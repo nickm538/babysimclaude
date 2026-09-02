@@ -79,7 +79,7 @@ input:focus { border-color: var(--accent2); }
 @keyframes rise { from { transform: translateY(10px); opacity: 0;} to { transform: none; opacity: 1;} }
 .bottombar { position: absolute; left: var(--sal); right: var(--sar); bottom: var(--sab); display: flex; align-items: flex-end; justify-content: space-between; padding: 10px 12px; gap: 10px; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 70vw; }
-.actions button { font-size: 13px; padding: 9px 12px; background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.actions button { font-size: 13px; padding: 9px 12px; background: rgba(16,19,26,0.9); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .actions button.primary { background: linear-gradient(135deg, #f6b26b, #e8894f); }
 .actions button.warn { border-color: rgba(242,201,76,0.5); }
 .actions .hint { width: 100%; text-align: right; font-size: 12px; color: var(--muted); }
@@ -145,8 +145,117 @@ input:focus { border-color: var(--accent2); }
 .bigstat div { flex: 1; background: rgba(255,255,255,0.05); border-radius: 12px; padding: 10px; text-align: center; }
 .bigstat b { display: block; font-size: 22px; }
 .bigstat span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+/* ---- vector icons -------------------------------------------------------
+   icons.js emits <svg class="ic" viewBox="0 0 24 24"> with no width/height, so
+   without these rules every icon paints at the SVG default of 300x150. */
+.ic { width: 1.15em; height: 1.15em; flex: 0 0 auto; display: inline-block; vertical-align: -0.18em; stroke: currentColor; fill: none; }
+.ic-lg { width: 1.6em; height: 1.6em; }
+.fab .ic { width: 24px; height: 24px; }
+.pill .ic, .mini .ic, .chip .ic { width: 14px; height: 14px; }
+.bar .bi { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.bar .bi .ic { width: 15px; height: 15px; }
+.pill .mini { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; color: var(--muted); font-size: 11px; }
+.pill .mini.warn { color: var(--warn); }
+.chev { display: inline-flex; color: var(--muted); transition: transform .2s; }
+.chev .ic { width: 16px; height: 16px; }
+.vitals.collapsed .chev { transform: rotate(-90deg); }
+.mood-head { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; font-size: 12px; min-width: 0; }
+.mood-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- mood spectrum (mood.js) -------------------------------------------- */
+.mood { margin: 6px 0 8px; cursor: pointer; }
+.mood-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.mood-lbl { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; font-size: 12px; text-transform: capitalize; }
+.mood-val { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; }
+.mood-bar { position: relative; height: 8px; border-radius: 5px; margin: 5px 0 4px; overflow: visible; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35); }
+.mood-needle { position: absolute; top: -3px; width: 4px; height: 14px; border-radius: 3px; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,0.6); transform: translateX(-50%); transition: left .8s ease-out; }
+.mood-text { font-size: 11px; line-height: 1.35; color: var(--muted); }
+.mood.grim .mood-text { color: #ffb3b3; }
+
+/* ---- alert banners and history (notifications.js) ------------------------ */
+.alerts { position: absolute; right: calc(var(--sar) + 10px); top: calc(var(--sat) + 56px); width: min(340px, 76vw); display: flex; flex-direction: column; gap: 8px; z-index: 15; }
+.alert { display: flex; align-items: flex-start; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--info); border-radius: 14px; padding: 10px 10px 10px 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); animation: slidein .28s ease-out; }
+.alert.nomotion { animation: none; }
+.alert.good { border-left-color: var(--good); }
+.alert.warn { border-left-color: var(--warn); }
+.alert.danger { border-left-color: var(--danger); background: rgba(58,12,12,0.9); }
+.alert.illness { border-left-color: #c77dff; }
+.alert.out { opacity: 0; transform: translateX(12px); transition: opacity .25s, transform .25s; }
+.alert .ai { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex: 0 0 auto; border-radius: 8px; background: rgba(255,255,255,0.07); color: var(--info); }
+.alert.good .ai { color: var(--good);} .alert.warn .ai { color: var(--warn);} .alert.danger .ai { color: #ffb3b3;} .alert.illness .ai { color: #e0b3ff; }
+.ab { flex: 1; min-width: 0; }
+.at { font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; gap: 6px; }
+.at small { color: var(--muted); font-weight: 400; font-size: 11px; }
+.as { font-size: 12px; line-height: 1.4; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.alert .primary { font-size: 12px; padding: 6px 10px; align-self: center; white-space: nowrap; }
+.ax { background: transparent; border: none; color: var(--muted); padding: 2px; border-radius: 8px; align-self: flex-start; }
+.ax .ic { width: 15px; height: 15px; }
+.alert-list { display: flex; flex-direction: column; gap: 6px; }
+.alert-row { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border-radius: 10px; background: rgba(255,255,255,0.03); border-left: 3px solid var(--info); }
+.alert-row.good { border-left-color: var(--good);} .alert-row.warn { border-left-color: var(--warn);} .alert-row.danger { border-left-color: var(--danger);}
+.alert-row.new { background: rgba(127,200,232,0.09); }
+.alert-row .ai { color: var(--muted); display: flex; padding-top: 1px; }
+button.sm { font-size: 12px; padding: 5px 9px; margin-top: 6px; }
+@keyframes slidein { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ---- action rail (hud.js) ----------------------------------------------- */
+.actionwrap { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 74vw; }
+.cats { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.cats button { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 6px 10px; border-radius: 999px; background: rgba(16,19,26,0.94); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.cats button.on { background: rgba(246,178,107,0.22); border-color: rgba(246,178,107,0.5); }
+.cats .ic { width: 15px; height: 15px; }
+.cats .n { font-style: normal; font-size: 10px; font-weight: 700; color: var(--muted); background: rgba(255,255,255,0.09); border-radius: 999px; padding: 0 5px; }
+.actions button { display: inline-flex; align-items: center; gap: 6px; }
+.actions button .ic { width: 16px; height: 16px; }
+/* Every category's buttons stay in the DOM; only the selected group is shown. */
+.catgroup { display: none; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.catgroup.on { display: flex; }
+.cat.danger { border-color: rgba(235,87,87,0.45); color: #ffb3b3; background: rgba(235,87,87,0.14); }
+.cat.danger.on { background: rgba(235,87,87,0.28); }
+.fab.urgent { border-color: rgba(235,87,87,0.7); animation: pulse 1.2s infinite; }
+.baby-label.tinted { border-color: var(--mood); }
+.baby-label .ic { width: 14px; height: 14px; margin-right: 4px; }
+
+/* ---- story tab (story.js) ----------------------------------------------- */
+.keepsake { background: linear-gradient(160deg, rgba(246,178,107,0.10), rgba(255,255,255,0.03) 55%); }
+.keepsake h3 { display: flex; align-items: center; gap: 6px; color: var(--text); text-transform: none; letter-spacing: 0; font-size: 15px; }
+.lede { font-size: 13px; line-height: 1.5; font-style: italic; color: var(--text); }
+.timeline { position: relative; padding-left: 6px; }
+.timeline::before { content: ''; position: absolute; left: 11px; top: 6px; bottom: 6px; width: 2px; background: rgba(255,255,255,0.10); }
+.chap { position: relative; display: flex; gap: 10px; padding: 6px 0 10px; }
+.chap-dot { position: relative; z-index: 1; width: 11px; height: 11px; border-radius: 50%; flex: 0 0 auto; margin-top: 4px; }
+.chap-body { flex: 1; min-width: 0; }
+.chap-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.chap-head small { color: var(--muted); font-size: 11px; }
+.chap-body p { font-size: 13px; line-height: 1.45; margin: 4px 0 6px; }
+.chap.draft { opacity: 0.75; }
+.chap.draft .chap-body p { font-style: italic; }
+.memories { display: flex; flex-direction: column; gap: 8px; }
+.mem { display: flex; gap: 8px; background: rgba(255,255,255,0.04); border-radius: 12px; padding: 9px 10px; }
+.mem.big { background: rgba(246,178,107,0.10); border: 1px solid rgba(246,178,107,0.22); }
+.mem .q { color: var(--muted); flex: 0 0 auto; display: flex; padding-top: 2px; }
+.mem p { margin: 0; font-size: 13px; line-height: 1.45; }
+.mem small { color: var(--muted); font-size: 11px; }
+.chapter-card { display: flex; gap: 10px; background: rgba(255,255,255,0.04); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin: 10px 0; }
+.chapter-card .ic { color: var(--accent); margin-top: 2px; }
+.chapter-card h4 { margin: 0 0 4px; font-size: 14px; }
+.chapter-card p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+
+/* ---- timed choice modal (main.js) --------------------------------------- */
+.choice .card { border-color: rgba(242,201,76,0.45); }
+.choice .card h2 { margin-top: 0; font-size: 18px; }
+.choice .games-list button { display: block; width: 100%; text-align: left; }
+.choice .games-list .tag { display: block; color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 3px; }
+.choice #ch-timer { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  .alert, .mood-needle, .bar .fill { animation: none !important; transition: none !important; }
+}
+
 @media (max-width: 520px) {
   .vitals { width: 148px; }
   .hintbox { display: none; }
   .actions { max-width: 62vw; }
+  .actionwrap { max-width: 66vw; }
+  .alerts { width: min(300px, 84vw); right: calc(var(--sar) + 8px); }
 }

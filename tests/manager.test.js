@@ -7,7 +7,7 @@ import { createFileStore } from '../server/db/filestore.js';
 import { GameManager } from '../server/game_manager.js';
 import { TIME } from '../shared/constants.js';
 
-test('offline catch-up simulates 2x real time, capped, and reports a summary', async () => {
+test('offline catch-up simulates 2x real time and reports a summary', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cradle-test-'));
   const store = await createFileStore(dir);
   const gm = new GameManager(store);
@@ -21,11 +21,16 @@ test('offline catch-up simulates 2x real time, capped, and reports a summary', a
     assert.ok(Math.abs(loaded.sim.time - 8 * 3600) < 60, `expected ~8h of sim time, got ${loaded.sim.time}`);
     assert.ok(loaded.awaySummary && loaded.awaySummary.hours > 7.9);
     assert.ok(loaded.baby.needs.fullness < 40, 'baby should be hungry after 8 unattended hours');
-    // a 3-day absence is capped
+    // A 3-day absence: the first OFFLINE_CAP runs unattended, the rest is covered by a carer rather
+    // than being discarded — the whole absence still lands in the child's life.
     loaded.lastTickAt = Date.now() - 72 * 3600 * 1000; loaded.sim.time = 0;
+    Object.assign(loaded.inventory, { formula: 300, bottles: 6, bottlesClean: 6, wipes: 900, purees: 90 });
+    for (const k of Object.keys(loaded.inventory.diapers)) loaded.inventory.diapers[k] = 300;
     await store.saveGame(loaded); gm.games.delete(g.id);
     const again = await gm.load(g.id);
-    assert.ok(again.sim.time <= TIME.OFFLINE_CAP + 1);
+    assert.ok(again.sim.time > TIME.OFFLINE_CAP, `the absence past the cap is covered, not dropped (got ${(again.sim.time / 3600).toFixed(1)}h)`);
+    assert.ok(again.sim.time <= TIME.OFFLINE_CAP + TIME.OFFLINE_CARE_CAP + 1, 'but one absence is still bounded');
+    assert.ok(Math.abs(again.sim.time - 144 * 3600) < 120, `72 real hours away = 144 sim hours, got ${(again.sim.time / 3600).toFixed(1)}h`);
   } finally {
     await gm.shutdown(); await store.close(); fs.rmSync(dir, { recursive: true, force: true });
   }

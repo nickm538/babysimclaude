@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authMiddleware } from '../auth.js';
 import { babyReply, llmAvailable } from '../ai/babyChat.js';
 import { applyAction } from '../sim/actions.js';
-import { advance } from '../sim/engine.js';
+import { advance, collect } from '../sim/engine.js';
 import { rateLimit } from '../ratelimit.js';
 import { SHOP, TOYS, LESSONS, BABYPROOFING, CLOTHING_SIZES, DIAPER_SIZES, MILESTONES, CHECKUPS, VACCINES, ILLNESSES, TIME } from '../../shared/constants.js';
 
@@ -83,8 +83,9 @@ export function gameRoutes(store, gm) {
     r.post('/:id/debug/advance', async (req, res) => {
       const g = await own(req, res); if (!g) return;
       const days = Math.max(0, Math.min(2000, Number(req.body?.days) || 0));
-      const before = g.journal.length;
       const care = req.body?.care !== false;
+      const events = [];
+      const run = (fn) => events.push(...collect(fn));
       // day by day, with a babysitter, stocked supplies and basic health upkeep so the baby reaches the target age alive
       for (let d = 0; d < days && g.status === 'active'; d++) {
         if (care) {
@@ -95,10 +96,10 @@ export function gameRoutes(store, gm) {
           g.baby.needs.health = Math.max(g.baby.needs.health, 85); g.baby.needs.stimulation = Math.max(g.baby.needs.stimulation, 60); g.baby.needs.affection = Math.max(g.baby.needs.affection, 60);
           g.baby.state.lastSolidsAt = g.sim.time;
         }
-        advance(g, 86400, { offline: false });
+        run(() => advance(g, 86400, { offline: false }));
       }
-      if (care && g.status === 'active') { g.parent.babysitterUntil = 0; const sz = g.baby.wear.neededSize; g.inventory.clothes[sz] = (g.inventory.clothes[sz] || 0) + 3; applyAction(g, 'dress', { size: sz, outfit: g.baby.wear.outfit }); }
-      const entry = gm.games.get(g.id); await gm.persist(entry, g.journal.slice(before), true); gm.broadcast(entry, []);
+      if (care && g.status === 'active') { g.parent.babysitterUntil = 0; const sz = g.baby.wear.neededSize; g.inventory.clothes[sz] = (g.inventory.clothes[sz] || 0) + 3; run(() => applyAction(g, 'dress', { size: sz, outfit: g.baby.wear.outfit })); }
+      const entry = gm.games.get(g.id); await gm.persist(entry, events, true); gm.broadcast(entry, []);
       res.json({ ok: true, game: gm.view(g.id) });
     });
   }

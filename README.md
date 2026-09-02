@@ -15,11 +15,28 @@ tantrum and mistake is simulated on the server and saved to a database, so the b
 - **Death and success**: the baby can die (starvation, untreated illness, unsafe sleep, accidents, poisoning, failure to thrive). It
   takes a lot, but it is possible. The game is won when the child turns five; the outcome is graded on health, happiness, trust and
   development.
+- **A story that keeps building** (`server/sim/story.js` + `mood.js`, `storyChapters.js`, `storyEvents*.js`): a 76-entry catalog of
+  unpredictable events gated on age, mobility, supervision, season, weather, temperament, traits, inventory and baby-proofing — from
+  the first belly laugh and a tower built alone to a blowout, a night terror, a stolen porch delivery and the rat poison in the
+  unlocked cupboard, which starts a countdown that a telehealth visit can beat and silence cannot. Some events open a **timed choice**
+  that expires into its default if you dither. A 10-point **mood spectrum** runs from *agony* to *elated*. Every week of life is
+  written up as a **chapter**, and the moments that mattered become **memories** the baby chat actually remembers between sessions.
+- **The people around you** (`server/sim/social.js`): a generated circle of grandparents, an aunt, friends, a neighbour and a health
+  visitor, each with a personality, availability, distance, a closeness score that decays if you never call, and advice that is
+  sometimes decades out of date. Calls, video calls, photos, visits, gifts, a contact babysitter and a weekly playgroup.
 - **Real time**: 24× while you play (1 real hour = 1 baby day), with optional ×4 fast-forward while the baby sleeps peacefully, and
-  2× real time while you're away (capped at 24 baby-hours per absence). When you come back you get a summary: the baby may have
-  napped, played, filled a diaper, crawled to the stairs, eaten something off the floor, or got sick.
+  2× real time while you're away. The first 24 baby-hours of an absence run with **nobody in the house** — that is where a baby left
+  alone roams, gets into things, and can die. A longer absence is not thrown away: the rest (up to 10 baby-days) is covered by a
+  stand-in carer who feeds and changes **from your supplies** and runs out if you left none, but gives none of the affection. When you
+  come back you get a summary and the chapter written while you were gone: the baby may have napped, played, filled a diaper, crawled
+  to the stairs, eaten something off the floor, or got sick.
 - **Live chat with the baby**: age-aware responses (newborn body language → babble → toddler sentences → preschooler stories) from the
-  Anthropic API with a rule-based fallback. Your tone is classified — harsh messages count as yelling.
+  Anthropic API with a rule-based fallback, fed the story summary so the baby's replies reflect the life it has actually had. Your
+  tone is classified — harsh messages count as yelling.
+- **43 further interactions** (`server/sim/actions2.js`, `actions3.js`): teaching words that build a real vocabulary, naming body
+  parts, dialogic reading, introducing allergens one at a time (with real reactions and real tolerance), praise vs. gentle correction
+  vs. time-in, peekaboo, massage, skin-to-skin, sensory play, night checks, dream feeds, nail trims, first haircut, sunscreen, chores
+  done together, and simply watching for a minute — which changes nothing except that you were there.
 - **3D client** (`client/`): Three.js first-person house (living room, nursery nook, kitchen corner, stairs, front door), procedural PBR
   textures, day/night lighting, and a fully procedural baby: a metaball/marching-cubes body with a skeleton, expression morph targets,
   eyes that track you and blink, hair strands, a subsurface-scattering skin shader, growth-based proportions, crawling/walking
@@ -35,8 +52,14 @@ tantrum and mistake is simulated on the server and saved to a database, so the b
 npm install
 cp .env.example .env      # optional; without DATABASE_URL a JSON file store in ./data is used
 npm run dev               # http://localhost:3000
-npm test                  # simulation tests
+npm test                  # 57 tests: simulation, story, social, interactions, persistence
+npm run smoke             # boots the server, drives REST + WS, loads the client in Chromium
+node scripts/soak.mjs --years 5   # five simulated years per care profile, with invariant checks
 ```
+
+`scripts/soak.mjs` is the long-run safety net: it plays five sim-years four ways (attentive, minimal, total neglect, random
+fuzzing), asserts the invariants hold the whole way, and checks the outcomes — attentive care must reach the fifth birthday
+thriving, total neglect must be fatal but must take more than a day, and the same seed must always give the same life.
 
 ## Deploy on Railway
 1. Create a new Railway project from this repo (the repo root has `railway.json` and a `Dockerfile`; either builder works).
@@ -52,8 +75,8 @@ single replica is correct.
 
 ## Controls
 - **Phone/tablet**: left thumb = virtual joystick to walk, right thumb = drag to look, tap objects/baby to interact. Bottom-right
-  buttons are context actions; 📱 opens the phone (Baby, Health, Shop, Wardrobe, School, Home, Friends, Journal, Settings), 💬 talks
-  to the baby, 🍼 walks you to the baby.
+  buttons are context actions, grouped into categories (Care, Play, Learn, Temper…); 📱 opens the phone (Baby, Health, Shop, Wardrobe,
+  School, Home, Family, Friends, Story, Settings), 🔔 opens the alert history, 💬 talks to the baby, 🍼 walks you to the baby.
 - **Desktop**: WASD/arrows walk, mouse drag looks, click interacts, Shift hurries.
 
 ## How the day works
@@ -72,7 +95,10 @@ Never enable this in production.
 
 `npm run smoke` needs Playwright to be importable: either `npm i -D playwright` (downloads Chromium) or point it at an existing install
 with `SMOKE_PW_PATH=/path/to/playwright/index.mjs` and `SMOKE_CHROME=/path/to/chrome`. `SMOKE_SHOTS=1` writes extra screenshots
-to `scripts/`.
+to `scripts/`. Without Playwright the REST/WebSocket half still runs and the browser half is skipped.
+
+To reproduce one specific baby exactly — same seed, appearance, temperament and circle of people — pass an `id` to `createGame`:
+`createGame({ userId, babyName: 'Wren', id: 'repro-1' })`. Everything random about a newborn derives from it.
 
 ## Tech
 Node 20+, Express, `ws`, `pg`, `bcryptjs`, Three.js 0.170 (served from `node_modules`, ES modules + import map, no bundler),

@@ -16,6 +16,7 @@ import { Chat } from './ui/chat.js';
 import { authScreen, gameSelectScreen, awayModal, deathModal, winModal, chooserModal } from './ui/screens.js';
 import { NotificationCenter } from './ui/notifications.js';
 import { buildArt } from './world/art.js';
+import { Effects } from './engine/effects.js';
 import { chooseWord, chooseAllergen, chooseDiscipline, choosePlayActivity, chooseLearn, chooseCare, chooseChores, showObservation, ACTION_DUR } from './ui/interactions.js';
 
 const $boot = document.getElementById('boot'), $status = document.getElementById('boot-status');
@@ -86,12 +87,13 @@ function buildWorld(view) {
     onOpen: () => G.phone.open('story'),
     onCta: (cta) => { if (!cta) return; if (String(cta.action).startsWith('ui:')) uiAction(G, String(cta.action).slice(3), cta.params); else runAction(G, cta.action, cta.params || {}, { anim: 'none', remote: true }); },
     audio, vibrate: (ms) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } },
-    effects: () => G.effects,
+    onBurst: (kind) => { try { G.effects?.emit(kind, baby.headWorldPosition().add(new THREE.Vector3(0, 0.18, 0)), kind === 'confetti' ? 64 : 26); } catch { /* baby not in the room */ } },
     babyHead: () => baby.headWorldPosition(),
   });
   G.alerts.bindGame(store.gameId);
   G.alerts.attachBell(document.getElementById('fab-alerts'));
   try { G.art = buildArt(R.scene, { name: view.baby.name }); } catch (e) { console.warn('[art]', e.message); }
+  try { G.effects = new Effects(R.scene); } catch (e) { console.warn('[effects]', e.message); }
   G.phone = new Phone(overlay, { run: (id, p, o) => runAction(G, id, p, o), setSpeed: (s) => setSpeed(G, s), audio, switchGame: () => restart(), signOut: () => { api.setToken(null); location.reload(); }, playdate: (kind, arg) => playdate(G, kind, arg), get tts() { return G.tts; }, set tts(v) { G.tts = v; } });
   G.chat = new Chat(overlay, { nearBaby: () => G.near.baby || (store.view && store.view.baby.state.held), onReply: (text) => { if (G.tts && audio.ctx) audio.speak(text, store.view.sim.days); }, onSpeak: () => { controls.lookAt(baby.headWorldPosition()); } });
   controls.onStep = () => audio.footstep();
@@ -108,6 +110,7 @@ const POINTS = { kitchen: [-5.2, 0, -2.6], changing_table: [4.6, 0, -1.2], crib:
 function frame(G, dt) {
   const v = store.view; if (!v) return;
   G.controls.update(dt);
+  G.effects?.update(dt);
   G.baby.update(v, dt, G.R.camera, G.heldRig);
   G.arms.update(dt);
   if (G.guest) G.guest.update(G.guestView, dt, G.R.camera, new THREE.Group());

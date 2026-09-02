@@ -17,8 +17,11 @@ export function defaultAppearance(seedStr) {
   };
 }
 
-export function createGame({ userId, babyName, sex = 'boy', parentName = 'You', appearance, settings } = {}) {
-  const id = randomUUID();
+// `id` is normally left out and generated; pass one to reproduce a specific baby exactly (tests, and
+// re-running a game a player reported a problem with — everything random about a newborn, from the
+// seed to the appearance to the temperament and the circle of people, derives from it).
+export function createGame({ userId, babyName, sex = 'boy', parentName = 'You', appearance, settings, id: fixedId } = {}) {
+  const id = fixedId || randomUUID();
   const now = Date.now();
   const g = medianGrowth(0, sex);
   const w = g.weight * (0.92 + (hashSeed(id) % 100) / 600);

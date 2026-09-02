@@ -75,6 +75,16 @@ try {
     check(chatOk, 'chat panel round-trip');
     await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-chat.png') });
     await clickStep('#chat-close', 'close chat'); await wait(200);
+    // fire a particle burst so the effects shader actually compiles and runs a few frames
+    const burst = await page.evaluate(() => {
+      const G = window.__cradle;
+      if (!G || !G.effects) return 'missing';
+      G.effects.emit('confetti', G.baby.headWorldPosition(), 64);
+      G.effects.emit('hearts', G.baby.headWorldPosition(), 24);
+      return G.effects.count;
+    });
+    await wait(500);
+    check(typeof burst === 'number' && burst > 0, `particle burst emitted (${burst})`);
     const temperOpened = await page.evaluate(() => { const b = [...document.querySelectorAll('.actions button')].find((x) => x.textContent.includes('Lose your temper')); if (!b) return 'nobutton'; b.click(); return 'clicked'; }); await wait(400); const hasModal = await page.evaluate(() => !!document.querySelector('#ch-cancel')); check(temperOpened === 'clicked' && hasModal, 'temper chooser opens'); if (hasModal) await page.$eval('#ch-cancel', (el) => el.click());
     // age the baby into a toddler through the debug endpoint and make sure the model rebuilds without errors
     await j('POST', `/api/games/${id}/actions`, { id: 'put_down', params: { location: 'play_mat', position: 'sitting' } }, u.token);

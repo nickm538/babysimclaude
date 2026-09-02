@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../auth.js';
 import { applySocialAction } from '../sim/social.js';
+import { collect } from '../sim/engine.js';
 import { rateLimit } from '../ratelimit.js';
 
 const ACTIONS = new Set(['call', 'video', 'photo', 'invite', 'babysit', 'respond', 'playgroup']);
@@ -28,12 +29,10 @@ export function socialRoutes(store, gm) {
       enrolled: body.enrolled !== false,
     };
 
-    const before = g.journal.length;
-    let result;
-    try { result = applySocialAction(g, action, params); } catch (e) { console.error('[social]', e); return res.status(500).json({ error: 'Server error' }); }
+    let result, events;
+    try { events = collect(() => { result = applySocialAction(g, action, params); }); } catch (e) { console.error('[social]', e); return res.status(500).json({ error: 'Server error' }); }
 
     const entry = gm.games.get(g.id);
-    const events = g.journal.slice(before);
     if (entry) { gm.broadcast(entry, events); await gm.persist(entry, events, true); }
     res.json({ ...result, game: gm.view(g.id) });
   });

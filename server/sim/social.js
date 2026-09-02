@@ -89,6 +89,8 @@ function slog(game, s, text, sev = 'info', notify = false, title = 'Family') {
   if (s.log.length > 40) s.log.splice(0, s.log.length - 40);
   if (notify && Array.isArray(game.notifications)) {
     game.notifications.unshift({ id: 'sn' + s.seq++, t: game.sim.time, kind: 'social', sev: sev === 'good' ? 'info' : sev, title, text });
+    // Same cap the story layer keeps, so a chatty family never grows the save file without bound.
+    if (game.notifications.length > 40) game.notifications.length = 40;
   }
 }
 

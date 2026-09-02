@@ -2,7 +2,7 @@
 // offline catch-up on load, persistence and event fan-out.
 import { TIME } from '../shared/constants.js';
 import { createGame } from './sim/state.js';
-import { advance } from './sim/engine.js';
+import { advance, collect, log } from './sim/engine.js';
 import { applyAction, placeOrder } from './sim/actions.js';
 import { gameView } from './sim/view.js';
 import { writeChapterNow, ensureStory } from './sim/story.js';
@@ -17,7 +17,7 @@ export class GameManager {
   async create(userId, opts) {
     const game = createGame({ userId, ...opts });
     ensureStory(game);
-    game.journal.push({ t: 0, type: 'home', text: `You brought ${game.baby.name} home. ${game.baby.sex === 'girl' ? 'She' : 'He'} is asleep in the crib. Everything starts now.`, sev: 'good' });
+    log(game, 'home', `You brought ${game.baby.name} home. ${game.baby.sex === 'girl' ? 'She' : 'He'} is asleep in the crib. Everything starts now.`, 'good');
     await this.store.saveGame(game);
     this.games.set(game.id, { game, subscribers: new Set(), lastSave: Date.now(), lastTouch: Date.now() });
     return game;
@@ -34,20 +34,41 @@ export class GameManager {
     return game;
   }
 
-  // Simulate the time the player was away (real time * OFFLINE_SCALE, capped).
+  // Simulate the time the player was away (real time * OFFLINE_SCALE).
+  //
+  // The first OFFLINE_CAP of it runs with nobody in the house: that is the window where a baby left
+  // alone roams, gets into things and can die. A longer absence is not thrown away — the rest runs
+  // with a stand-in carer who feeds and changes from your supplies (and runs out if you left none),
+  // but gives none of the affection, so the arc keeps building and coming home still costs you.
   async catchUp(entry) {
     const g = entry.game;
     const now = Date.now();
     const realElapsed = Math.max(0, now - (g.lastTickAt || now)) / 1000;
-    const simSeconds = Math.min(realElapsed * TIME.OFFLINE_SCALE, TIME.OFFLINE_CAP);
+    const wanted = realElapsed * TIME.OFFLINE_SCALE;
+    const alone = Math.min(wanted, TIME.OFFLINE_CAP);
+    const covered = Math.min(Math.max(0, wanted - alone), TIME.OFFLINE_CARE_CAP);
     g.lastTickAt = now;
-    if (g.status !== 'active' || simSeconds < 30) { await this.store.saveGame(g); return []; }
+    if (g.status !== 'active' || alone < 30) { await this.store.saveGame(g); return []; }
     const before = g.sim.time;
-    const events = advance(g, simSeconds, { offline: true });
+    let carerName = null;
+    const events = collect(() => {
+      advance(g, alone, { offline: true });
+      if (covered >= 30 && g.status === 'active') {
+        const carer = pickCarer(g);
+        carerName = carer;
+        log(g, 'sitter', `You were gone long enough that ${carer} stepped in to keep ${g.baby.name} fed and dry.`, 'warn');
+        const wasSitting = g.parent.babysitterUntil;
+        g.parent.babysitterUntil = g.sim.time + covered;
+        advance(g, covered, { offline: true });
+        g.parent.babysitterUntil = Math.max(0, Math.min(wasSitting, g.sim.time));
+      }
+    });
     const hours = (g.sim.time - before) / 3600;
-    g.journal.push({ t: g.sim.time, type: 'return_home', text: `You were away for ${hours >= 1 ? `${hours.toFixed(1)} hours` : `${Math.round(hours * 60)} minutes`} of ${g.baby.name}'s life.`, sev: 'info' });
+    const span = hours >= 48 ? `${(hours / 24).toFixed(1)} days` : hours >= 1 ? `${hours.toFixed(1)} hours` : `${Math.round(hours * 60)} minutes`;
+    log(g, 'return_home', `You were away for ${span} of ${g.baby.name}'s life.`, 'info');
     const chapter = writeChapterNow(g, 'away', 0.25);
     g.awaySummary = summarizeAway(g, events, hours);
+    if (carerName) g.awaySummary.carer = carerName;
     if (chapter) { g.awaySummary.chapter = chapter.summary; g.awaySummary.chapterTitle = `Chapter ${chapter.index}: ${chapter.title}`; }
     await this.persist(entry, events, true);
     return events;
@@ -84,9 +105,8 @@ export class GameManager {
     const entry = this.games.get(id) || (await this.load(id), this.games.get(id));
     if (!entry) return { ok: false, message: 'Game not found' };
     const g = entry.game;
-    const before = g.journal.length;
-    const result = applyAction(g, actionId, params);
-    const events = g.journal.slice(before);
+    let result;
+    const events = collect(() => { result = applyAction(g, actionId, params); });
     // an action might end the game (e.g. sids roll) — run one zero-length check
     if (g.status === 'active' && g.baby.needs.health <= 0) advance(g, 1);
     this.broadcast(entry, events);
@@ -97,10 +117,10 @@ export class GameManager {
   async order(id, items) {
     const entry = this.games.get(id) || (await this.load(id), this.games.get(id));
     if (!entry) return { ok: false, message: 'Game not found' };
-    const before = entry.game.journal.length;
-    const r = placeOrder(entry.game, items);
-    this.broadcast(entry, entry.game.journal.slice(before));
-    await this.persist(entry, entry.game.journal.slice(before), true);
+    let r;
+    const events = collect(() => { r = placeOrder(entry.game, items); });
+    this.broadcast(entry, events);
+    await this.persist(entry, events, true);
     return r;
   }
 
@@ -128,6 +148,16 @@ export class GameManager {
     clearInterval(this.timer);
     for (const entry of this.games.values()) await this.persist(entry, [], true);
   }
+}
+
+// Who covered a long absence. Uses a real contact when the social layer has one, so the name in the
+// journal is someone the player knows rather than an anonymous agency sitter.
+function pickCarer(g) {
+  const list = (g.social && Array.isArray(g.social.contacts)) ? g.social.contacts : [];
+  const best = list
+    .filter((c) => c && c.skills && c.skills.babysitting >= 0.3 && (c.relationship || 0) >= 35)
+    .sort((a, b) => b.relationship * b.skills.babysitting - a.relationship * a.skills.babysitting)[0];
+  return best ? best.name : 'a stand-in sitter';
 }
 
 function summarizeAway(g, events, hours) {

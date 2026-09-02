@@ -9,7 +9,12 @@ export const TIME = {
   ONLINE_SCALES: [1, 6, 24, 60],
   SLEEP_BOOST: 4, // extra multiplier while baby sleeps calmly (if enabled)
   OFFLINE_SCALE: 2, // 1 real hour away = 2 sim hours for the baby
-  OFFLINE_CAP: 24 * HOUR, // max sim time simulated for one absence
+  // A short absence is simulated with nobody there: that is the window in which a baby left alone
+  // gets into things, gets ill, and can die. Anything beyond it is covered by a stand-in carer who
+  // feeds and changes from YOUR supplies but gives none of the affection — so the story keeps
+  // building across a week away instead of that week being silently thrown away.
+  OFFLINE_CAP: 24 * HOUR, // max unattended sim time simulated for one absence
+  OFFLINE_CARE_CAP: 10 * DAY, // max additional covered-by-a-carer sim time for one absence
   TICK_STEP: 5 * MIN, // integration step
   SERVER_TICK_MS: 2000,
   BIRTH_CLOCK: 10 * HOUR, // baby comes home at 10:00
@@ -476,16 +481,16 @@ export const SEASON_TEMP = { winter: 2, spring: 14, summer: 28, autumn: 11 };
 // --- mood spectrum, temperament and emergent traits (server/sim/mood.js, storyChapters.js) ---
 // MOOD_LABELS is ordered ascending by `min`; a value maps to the last entry whose min it meets.
 export const MOOD_LABELS = [
-  { min: -100, label: 'Agony', blurb: 'suffering, and running out of time' },
-  { min: -78, label: 'Misery', blurb: 'beyond comforting' },
-  { min: -58, label: 'Distress', blurb: 'frightened and overwhelmed' },
-  { min: -38, label: 'Unhappy', blurb: 'miserable and hard to settle' },
-  { min: -18, label: 'Low', blurb: 'flat and out of sorts' },
-  { min: -6, label: 'Neutral', blurb: 'neither happy nor upset' },
-  { min: 12, label: 'Content', blurb: 'settled and easy' },
-  { min: 34, label: 'Happy', blurb: 'bright and engaged' },
-  { min: 58, label: 'Joyful', blurb: 'delighted with the world' },
-  { min: 80, label: 'Elated', blurb: 'lit up from the inside' },
+  { min: -100, id: 'agony', label: 'Agony', blurb: 'suffering, and running out of time' },
+  { min: -78, id: 'misery', label: 'Misery', blurb: 'beyond comforting' },
+  { min: -58, id: 'distress', label: 'Distress', blurb: 'frightened and overwhelmed' },
+  { min: -38, id: 'unhappy', label: 'Unhappy', blurb: 'miserable and hard to settle' },
+  { min: -18, id: 'low', label: 'Low', blurb: 'flat and out of sorts' },
+  { min: -6, id: 'neutral', label: 'Neutral', blurb: 'neither happy nor upset' },
+  { min: 12, id: 'content', label: 'Content', blurb: 'settled and easy' },
+  { min: 34, id: 'happy', label: 'Happy', blurb: 'bright and engaged' },
+  { min: 58, id: 'joyful', label: 'Joyful', blurb: 'delighted with the world' },
+  { min: 80, id: 'elated', label: 'Elated', blurb: 'lit up from the inside' },
 ];
 
 export const TEMPERAMENTS = {

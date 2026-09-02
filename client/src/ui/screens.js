@@ -16,7 +16,7 @@ export function authScreen(overlay) {
       <label>Password</label><input id="au-pass" type="password" placeholder="at least 4 characters" autocomplete="current-password">
       <div class="err" id="au-err"></div>
       <div class="row"><button class="primary" id="au-login">Sign in</button><button id="au-register">Create account</button></div>
-      <p style="margin-top:12px;font-size:12px">Progress is saved on the server. The baby keeps living (at 2× real time, up to 24 h) while you're away.</p>`);
+      <p style="margin-top:12px;font-size:12px">Progress is saved on the server. The baby keeps living at 2× real time while you're away — the first 24 baby-hours with nobody there, and anything longer covered by a stand-in carer who feeds and changes but never cuddles.</p>`);
     const err = el.querySelector('#au-err');
     const go = async (fn) => {
       const u = el.querySelector('#au-user').value.trim(), p = el.querySelector('#au-pass').value;
@@ -62,7 +62,11 @@ export function gameSelectScreen(overlay, games) {
 export function awayModal(overlay, summary, view) {
   return new Promise((resolve) => {
     const el = document.createElement('div'); el.className = 'modal';
-    el.innerHTML = `<div class="card"><h1>Welcome back</h1><p>You were away for <b>${summary.hours} hours</b> of ${view.baby.name}'s life.</p>
+    const span = summary.hours >= 48 ? `${(summary.hours / 24).toFixed(1)} days` : `${summary.hours} hours`;
+    el.innerHTML = `<div class="card"><h1>Welcome back</h1><p>You were away for <b>${span}</b> of ${view.baby.name}'s life.</p>
+      ${summary.carer ? `<p style="color:var(--warn)">You were gone long enough that <b>${summary.carer}</b> had to step in. ${view.baby.name} was kept fed and dry — but not held, not played with, and not by you.</p>` : ''}
+      ${summary.chapterTitle ? `<p style="color:var(--muted)"><b>${summary.chapterTitle}</b></p>` : ''}
+      ${summary.chapter ? `<p style="color:var(--text);font-style:italic">${summary.chapter}</p>` : ''}
       <p style="color:var(--text)"><b>Right now:</b> ${summary.now}</p>
       ${summary.danger.length ? `<div class="journal">${summary.danger.map((d) => `<div class="e danger">${d}</div>`).join('')}</div>` : ''}
       ${summary.notable.length ? `<div class="journal">${summary.notable.map((d) => `<div class="e">${d}</div>`).join('')}</div>` : ''}

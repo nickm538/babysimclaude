@@ -16,6 +16,8 @@ import { BAD_EVENTS, CHOICE_EVENTS } from './storyEvents2.js';
 const CATALOG = [...GOOD_EVENTS, ...INFO_EVENTS, ...SOCIAL_HINTS, ...BAD_EVENTS, ...CHOICE_EVENTS];
 const BY_ID = Object.fromEntries(CATALOG.map((e) => [e.id, e]));
 const BAD_IDS = new Set(BAD_EVENTS.map((e) => e.id));
+// Handed to an event's optional fx() hook so the catalog stays free of engine imports.
+const FX_API = { HOUR, DAY, MIN, log, clamp };
 
 // Roughly how many notable beats a baby-day should contain before conditions thin the field.
 const EVENTS_PER_DAY = 4.5;
@@ -47,6 +49,8 @@ export function ensureStory(game) {
   if (!st.chapter) st.chapter = newChapterAccumulator(ageDays(game));
   if (!st.weather || !WEATHERS.includes(st.weather)) st.weather = 'clear';
   if (typeof st.weatherUntil !== 'number') st.weatherUntil = 0;
+  if (typeof st.poisonDeadline !== 'number') st.poisonDeadline = 0;
+  if (typeof st.poisonWarned !== 'boolean') st.poisonWarned = false;
   if (typeof st.lastIllnessId === 'undefined') st.lastIllnessId = game.baby.illness ? game.baby.illness.id : null;
   if (typeof st.lastDayEvaluated !== 'number') st.lastDayEvaluated = Math.floor(ageDays(game));
   if (typeof st.lastMoodSample !== 'number') st.lastMoodSample = 0;
@@ -98,7 +102,8 @@ function matches(e, game, cx) {
   if (e.temperaments && !e.temperaments.includes(cx.st.temperament)) return false;
   if (e.traits && !e.traits.every((id) => hasTrait(game, id))) return false;
   if (e.hasPackage != null && (game.house.doorPackages.length > 0) !== e.hasPackage) return false;
-  if (e.needToys && !e.needToys.every((id) => game.inventory.toys.includes(id))) return false;
+  // needToys wants every listed toy, unless the event opts into anyToy (any one of them will do).
+  if (e.needToys && !(e.anyToy ? e.needToys.some((id) => game.inventory.toys.includes(id)) : e.needToys.every((id) => game.inventory.toys.includes(id)))) return false;
   if (e.needMilestones && !e.needMilestones.every((id) => cx.b.milestones[id])) return false;
   if (e.noMilestones && e.noMilestones.some((id) => cx.b.milestones[id])) return false;
   if (e.needProofing && !e.needProofing.every((id) => game.house.proofing[id])) return false;
@@ -107,6 +112,8 @@ function matches(e, game, cx) {
   if (e.minDev) for (const [k, v] of Object.entries(e.minDev)) if ((cx.b.dev[k] || 0) < v) return false;
   if (e.minNeeds) for (const [k, v] of Object.entries(e.minNeeds)) if ((cx.b.needs[k] || 0) < v) return false;
   if (e.maxNeeds) for (const [k, v] of Object.entries(e.maxNeeds)) if ((cx.b.needs[k] || 0) > v) return false;
+  // anyOf: at least one of the sub-condition blocks must hold (the base keys above still all apply)
+  if (Array.isArray(e.anyOf) && e.anyOf.length && !e.anyOf.some((sub) => matches({ ...sub, anyOf: null }, game, cx))) return false;
   return true;
 }
 
@@ -120,6 +127,7 @@ export function applyEffects(game, fx, rng, sourceId = 'story') {
   if (fx.dev) for (const [k, v] of Object.entries(fx.dev)) if (typeof b.dev[k] === 'number') b.dev[k] = clamp(b.dev[k] + v);
   if (typeof fx.health === 'number') n.health = clamp(n.health + fx.health);
   if (typeof fx.rash === 'number') b.phys.rash = clamp(b.phys.rash + fx.rash);
+  if (typeof fx.parentEnergy === 'number') game.parent.energy = clamp(game.parent.energy + fx.parentEnergy);
   if (fx.celebrate) addCelebration(game, fx.celebrate);
   if (fx.inv) {
     for (const [k, v] of Object.entries(fx.inv)) {
@@ -135,6 +143,7 @@ export function applyEffects(game, fx, rng, sourceId = 'story') {
   }
   if (fx.milestone && !b.milestones[fx.milestone]) b.milestones[fx.milestone] = Math.floor(ageDays(game));
   if (fx.trait && st && st.counters) st.counters[fx.trait] = (st.counters[fx.trait] || 0) + 1;
+  if (fx.strangerWary && st && st.counters) st.counters.wary = (st.counters.wary || 0) + 1;
   if (fx.memory) addMemory(game, fillText(fx.memory.text, game), fx.memory.weight || 40, fx.memory.kind || 'moment');
   if (fx.illness && !b.illness) {
     const def = ILLNESSES[fx.illness.id];
@@ -163,6 +172,7 @@ function fire(game, e, rng, cx) {
   st.cooldowns[e.id] = game.sim.time + (e.cooldownH || 6) * HOUR;
   if (e.once && !st.fired.includes(e.id)) st.fired.push(e.id);
   applyEffects(game, e.effects, rng, e.id);
+  if (typeof e.fx === 'function') { try { e.fx(game, rng, FX_API); } catch (err) { console.error(`[story] fx ${e.id}:`, err.message); } }
 
   const type = e.effects && e.effects.hint ? 'social_hint' : 'story';
   log(game, type, text, sev);
@@ -287,6 +297,23 @@ export function rollStoryEvents(game, dtH, rng, opts = {}) {
   if (t - st.lastMoodSample > 30 * MIN) {
     st.lastMoodSample = t;
     sampleChapterMood(game, computeMood(game).value);
+  }
+
+  // A swallowed poison is on a clock: treat it (doctor/hospital) or it kills.
+  if (st.poisonDeadline) {
+    const ill = b.illness;
+    const treated = !ill || ill.id !== 'poisoning' || ill.treated || b.state.hospitalizedUntil > t;
+    if (treated) { st.poisonDeadline = 0; }
+    else if (t >= st.poisonDeadline) {
+      st.poisonDeadline = 0;
+      b.needs.health = 0; b.death = 'poisoning';
+      notify(game, { kind: 'danger', sev: 'danger', title: 'Too late', text: `${b.name} was never seen by a doctor.` });
+    } else if (!st.poisonWarned && t > st.poisonDeadline - 2 * HOUR) {
+      st.poisonWarned = true;
+      notify(game, { kind: 'danger', sev: 'danger', title: 'Running out of time',
+        text: `${b.name} is getting worse by the minute. A doctor has to see ${b.sex === 'girl' ? 'her' : 'him'} now.`,
+        cta: { action: 'doctor', params: { kind: 'sick' }, label: 'Emergency sick visit' } });
+    }
   }
 
   // illness onset detection -> unmistakable alert

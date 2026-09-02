@@ -6,18 +6,58 @@ import {
 import { makeRng } from './rng.js';
 import { updateIllness, rollIllnessOnset } from './health.js';
 import { roamAndHazards, runBabysitter } from './events.js';
-import { rollStoryEvents } from './story.js';
+import { rollStoryEvents, notify } from './story.js';
 import { socialTick } from './social.js';
 
 export function ageDays(game) { return game.sim.time / DAY; }
 export function clockSeconds(game) { return (TIME.BIRTH_CLOCK + game.sim.time) % DAY; }
 export function isNight(game) { const c = clockSeconds(game) / HOUR; return c < 6.5 || c >= 19.5; }
 
+// The journal is a rolling feed, but a day of feeds and nappies must never push out the beats the
+// player actually wants to look back on. When it overflows we drop the oldest routine entries first
+// and only start on the notable ones once there is nothing routine left.
+const JOURNAL_KEEP = 400;
+const JOURNAL_SLACK = 60; // compact in batches so this is amortised, not per-log work
+const NOTABLE_TYPES = new Set([
+  'story', 'social_hint', 'choice', 'chapter', 'milestone', 'trait', 'memory', 'win',
+  'illness', 'recovered', 'hospital', 'hospital_return', 'doctor', 'vaccine', 'fever_alert', 'ftt',
+  'allergy', 'colic', 'tooth', 'injury', 'choke', 'hazard', 'temper', 'death', 'delay', 'outgrown',
+  'potty_used', 'theft',
+]);
+const notable = (e) => e.sev === 'danger' || e.sev === 'warn' || NOTABLE_TYPES.has(e.type);
+
+// While advance() runs, every new entry is also collected here so callers get exactly the beats of
+// that call — index arithmetic against game.journal would be wrong the moment compaction trims it.
+let collector = null;
+
 export function log(game, type, text, sev = 'info', extra = {}) {
   const e = { t: game.sim.time, type, text, sev, ...extra };
   game.journal.push(e);
-  if (game.journal.length > 400) game.journal.splice(0, game.journal.length - 400);
+  if (collector) collector.push(e);
+  if (game.journal.length > JOURNAL_KEEP + JOURNAL_SLACK) compactJournal(game);
   return e;
+}
+
+function compactJournal(game) {
+  const j = game.journal;
+  let over = j.length - JOURNAL_KEEP;
+  for (let i = 0; i < j.length && over > 0; i++) {
+    if (!notable(j[i])) { j[i] = null; over--; }
+  }
+  let out = over > 0 ? j.filter((e, i) => e && i >= over) : j.filter(Boolean);
+  // A game that is nothing but notable entries still has to shrink somewhere.
+  if (out.length > JOURNAL_KEEP) out = out.slice(out.length - JOURNAL_KEEP);
+  game.journal = out;
+}
+
+// Run fn() and return every journal entry it produced. Callers used to diff game.journal.length
+// around a call, which breaks the moment compaction trims the array underneath them.
+export function collect(fn) {
+  const events = [];
+  const outer = collector;
+  collector = events;
+  try { fn(); } finally { collector = outer; if (outer) outer.push(...events); }
+  return events;
 }
 
 export function advance(game, simSeconds, opts = {}) {
@@ -25,14 +65,19 @@ export function advance(game, simSeconds, opts = {}) {
   if (game.status !== 'active' || simSeconds <= 0) return events;
   const rng = makeRng(game.sim.seed ^ (game.sim.steps * 2654435761));
   let remaining = simSeconds;
-  const before = game.journal.length;
-  while (remaining > 0 && game.status === 'active') {
-    const dt = Math.min(TIME.TICK_STEP, remaining);
-    step(game, dt, opts, rng);
-    remaining -= dt;
-    game.sim.steps++;
+  const outer = collector;
+  collector = events;
+  try {
+    while (remaining > 0 && game.status === 'active') {
+      const dt = Math.min(TIME.TICK_STEP, remaining);
+      step(game, dt, opts, rng);
+      remaining -= dt;
+      game.sim.steps++;
+    }
+  } finally {
+    collector = outer;
+    if (outer) outer.push(...events);
   }
-  events.push(...game.journal.slice(before));
   return events;
 }
 
@@ -347,10 +392,22 @@ function updateDevelopment(game, dtDays, rng, days) {
       b.milestones[m.id] = days;
       const late = days > m.maxDays;
       log(game, 'milestone', `Milestone: ${b.name} — ${m.label}${late ? ' (late)' : ''}!`, 'good', { milestone: m.id });
+      notify(game, {
+        kind: 'milestone', sev: 'good',
+        title: late ? `${m.label} — at last` : 'A first',
+        text: late
+          ? `${b.name} finally got there: ${m.label.toLowerCase()}. Later than most, but ${b.sex === 'girl' ? 'she' : 'he'} got there.`
+          : `${b.name}: ${m.label.toLowerCase()}. You were there for it.`,
+      });
       if (late) b.delays = b.delays.filter((d) => d !== m.id);
     } else if (!ok && days > m.maxDays && !b.delays.includes(m.id)) {
       b.delays.push(m.id);
       log(game, 'delay', `${b.name} hasn't reached "${m.label}" yet — this is later than typical.`, 'warn');
+      notify(game, {
+        kind: 'story', sev: 'warn', title: 'Taking longer than typical',
+        text: `${b.name} still hasn't reached "${m.label}". Worth raising with the doctor — and worth more of the play that builds it.`,
+        cta: { action: 'doctor', params: { kind: 'checkup' }, label: 'Book a checkup' },
+      });
     }
   }
   void t;
@@ -428,12 +485,20 @@ function updateOrders(game, t0, t) {
 }
 
 export function deathCause(game) {
-  const b = game.baby;
+  const b = game.baby, n = b.needs;
   if (b.death) return b.death;
   if (b.illness && b.illness.id === 'poisoning') return 'poisoning';
-  if (b.illness && b.illness.severity > 60) return b.illness.id;
-  if (b.needs.fullness < 10) return 'starvation';
+  const ill = b.illness, def = ill ? ILLNESSES[ill.id] : null;
+  // A dangerous illness kills on its own terms and gets named.
+  if (ill && ill.severity > 60 && def && def.danger >= 0.9) return ill.id;
+  if (n.fullness < 10) return 'starvation';
   if (b.injuries.length) return 'injury';
+  // An ordinary illness only finishes off a child whose care had already collapsed. Reporting that
+  // as "died of a common cold" would misname what actually killed them.
+  if (ill && ill.severity > 60) {
+    const starved = ['comfort', 'affection', 'stimulation', 'clean', 'rest'].filter((k) => n[k] < 25).length;
+    return starved >= 2 ? 'neglect_illness' : ill.id;
+  }
   return 'neglect';
 }
 
@@ -443,6 +508,7 @@ const CAUSE_TEXT = {
   poisoning: 'died after swallowing a household chemical that was within reach.',
   injury: 'died from injuries sustained while unsupervised.',
   neglect: 'died from prolonged neglect.',
+  neglect_illness: 'caught something ordinary — the kind of bug a cared-for child shrugs off in a week — and had nothing left to fight it with. Unheld, unwashed, understimulated and exhausted, the body simply gave in.',
   failure_to_thrive: 'stopped growing and died of failure to thrive — a body giving up without care and love.',
 };
 

@@ -11,7 +11,7 @@ import { DAY, HOUR } from '../shared/constants.js';
 const rng = () => makeRng(7);
 
 test('new game starts with a sleeping newborn and sane needs', () => {
-  const g = createGame({ userId: 'u', babyName: 'Zoe', sex: 'girl' });
+  const g = createGame({ userId: 'u', babyName: 'Zoe', sex: 'girl', id: 'test-1' });
   assert.equal(g.status, 'active');
   assert.equal(g.baby.state.activity, 'sleeping');
   for (const v of Object.values(g.baby.needs)) assert.ok(v >= 0 && v <= 100);
@@ -19,14 +19,14 @@ test('new game starts with a sleeping newborn and sane needs', () => {
 });
 
 test('needs decay over time and hunger causes crying', () => {
-  const g = createGame({ userId: 'u' });
+  const g = createGame({ userId: 'u', id: 'test-2' });
   advance(g, 6 * HOUR);
   assert.ok(g.baby.needs.fullness < 40, 'fullness should have dropped');
   assert.ok(g.stats.cries >= 1, 'baby should have cried');
 });
 
 test('feeding restores fullness and consumes formula + a clean bottle', () => {
-  const g = createGame({ userId: 'u' });
+  const g = createGame({ userId: 'u', id: 'test-3' });
   advance(g, 4 * HOUR);
   const before = g.inventory.formula;
   const r = applyAction(g, 'feed', { type: 'formula' }, rng());
@@ -37,7 +37,7 @@ test('feeding restores fullness and consumes formula + a clean bottle', () => {
 });
 
 test('solids before 4 months are rejected with consequences', () => {
-  const g = createGame({ userId: 'u' });
+  const g = createGame({ userId: 'u', id: 'test-4' });
   g.inventory.purees = 3;
   advance(g, 2 * HOUR);
   const comfort = g.baby.needs.comfort;
@@ -48,7 +48,7 @@ test('solids before 4 months are rejected with consequences', () => {
 });
 
 test('yelling drops trust and happiness sharply', () => {
-  const g = createGame({ userId: 'u' });
+  const g = createGame({ userId: 'u', id: 'test-5' });
   const t = g.baby.emo.trust, h = g.baby.emo.happiness;
   applyAction(g, 'yell', {}, rng());
   assert.ok(g.baby.emo.trust <= t - 7);
@@ -57,7 +57,7 @@ test('yelling drops trust and happiness sharply', () => {
 });
 
 test('total neglect eventually kills the baby but takes more than a day', () => {
-  const g = createGame({ userId: 'u' });
+  const g = createGame({ userId: 'u', id: 'test-6' });
   advance(g, 1 * DAY);
   assert.equal(g.status, 'active', 'should survive a single day');
   advance(g, 6 * DAY);
@@ -85,7 +85,7 @@ function careLoop(g, seconds) {
 }
 
 test('attentive care keeps the baby healthy for a week and builds trust', () => {
-  const g = createGame({ userId: 'u' });
+  const g = createGame({ userId: 'u', id: 'test-7' });
   const w0 = g.baby.phys.weightKg;
   careLoop(g, 7 * DAY);
   assert.equal(g.status, 'active');
@@ -95,7 +95,7 @@ test('attentive care keeps the baby healthy for a week and builds trust', () => 
 });
 
 test('orders arrive and can be collected into inventory', () => {
-  const g = createGame({ userId: 'u' });
+  const g = createGame({ userId: 'u', id: 'test-8' });
   const r = placeOrder(g, [{ id: 'diapers', size: '1' }, { id: 'clothes', size: '0-3M' }, { id: 'toy', size: 'rattle' }, { id: 'babyproof', size: 'stair_gate' }]);
   assert.ok(r.ok);
   advance(g, 7 * HOUR);
@@ -109,7 +109,7 @@ test('orders arrive and can be collected into inventory', () => {
 });
 
 test('doctor visit produces a report and schedules the nurse for vaccines', () => {
-  const g = createGame({ userId: 'u' });
+  const g = createGame({ userId: 'u', id: 'test-9' });
   careLoop(g, 4 * DAY);
   const r = applyAction(g, 'doctor', { kind: 'checkup' }, rng());
   assert.ok(r.ok && r.report && r.report.notes.length > 0);
@@ -118,7 +118,7 @@ test('doctor visit produces a report and schedules the nurse for vaccines', () =
 });
 
 test('game view is serialisable and hides nothing important', () => {
-  const g = createGame({ userId: 'u' });
+  const g = createGame({ userId: 'u', id: 'test-10' });
   advance(g, HOUR);
   const v = gameView(g);
   JSON.stringify(v);
@@ -134,7 +134,7 @@ test('tone classifier flags harsh language', () => {
 });
 
 test('deterministic: same seed and actions give the same outcome', () => {
-  const a = createGame({ userId: 'u' }), b = createGame({ userId: 'u' });
+  const a = createGame({ userId: 'u', id: 'test-11' }), b = createGame({ userId: 'u', id: 'test-12' });
   b.sim.seed = a.sim.seed; b.baby.phys = { ...a.baby.phys }; b.baby.appearance = { ...a.baby.appearance };
   advance(a, 12 * HOUR); advance(b, 12 * HOUR);
   assert.deepEqual(a.baby.needs, b.baby.needs);

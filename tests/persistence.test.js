@@ -10,7 +10,7 @@ import { GameManager } from '../server/game_manager.js';
 import { advance } from '../server/sim/engine.js';
 import { applyAction } from '../server/sim/actions.js';
 import { gameView } from '../server/sim/view.js';
-import { DAY, HOUR } from '../shared/constants.js';
+import { DAY, HOUR, TIME } from '../shared/constants.js';
 
 function tmpStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cradle-persist-'));
@@ -102,7 +102,8 @@ test('the saved state stays a reasonable size after a long life', async () => {
     await store.saveGame(g);
     const bytes = JSON.stringify(await store.getGame(g.id)).length;
     assert.ok(bytes < 1_500_000, `state should stay under 1.5 MB, got ${(bytes / 1024).toFixed(0)} KB`);
-    assert.ok(g.journal.length <= 400, 'the journal stays capped');
+    // The journal compacts in batches (400 kept + 60 slack) rather than on every single entry.
+    assert.ok(g.journal.length <= 460, `the journal stays capped, got ${g.journal.length}`);
   } finally { await gm.shutdown(); await store.close(); cleanup(); }
 });
 
@@ -124,5 +125,55 @@ test('event and chat history persist per game and are isolated between games', a
     await store.deleteGame(b.id);
     assert.equal(await store.getGame(b.id), null);
     assert.ok(await store.getGame(a.id), 'deleting one game leaves the other intact');
+  } finally { await gm.shutdown(); await store.close(); cleanup(); }
+});
+
+test('a long absence is covered by a carer instead of being thrown away', async () => {
+  const { dir, cleanup } = tmpStore();
+  const store = await createFileStore(dir);
+  const gm = new GameManager(store);
+  try {
+    const g = await gm.create('u1', { babyName: 'Odell', sex: 'boy' });
+    // Give the carer something to work with — they feed and change from the player's own supplies.
+    Object.assign(g.inventory, { formula: 400, bottles: 6, bottlesClean: 6, wipes: 2000, purees: 200 });
+    g.inventory.diapers.N = 400; g.inventory.diapers['1'] = 400; g.inventory.diapers['2'] = 400;
+    advance(g, 6 * HOUR);
+    const before = g.sim.time;
+    await store.saveGame(g);
+    gm.games.delete(g.id);
+
+    // Pretend the player vanished for four real days (8 sim days at OFFLINE_SCALE 2).
+    const stored = await store.getGame(g.id);
+    stored.lastTickAt = Date.now() - 4 * 24 * 3600 * 1000;
+    await store.saveGame(stored);
+
+    const back = await gm.load(g.id);
+    const grew = (back.sim.time - before) / DAY;
+    assert.ok(grew > 3, `the arc keeps building while away, only advanced ${grew.toFixed(2)} days`);
+    assert.ok(grew <= (TIME.OFFLINE_CAP + TIME.OFFLINE_CARE_CAP) / DAY + 0.01, `capped per absence, got ${grew.toFixed(2)} days`);
+    assert.equal(back.status, 'active', 'a stocked house plus a carer keeps the baby alive');
+    assert.ok(back.awaySummary.carer, 'the player is told who covered for them');
+    assert.ok(back.journal.some((e) => e.type === 'sitter'), 'the stand-in is journalled');
+    // Fed and dry, but nobody held him: affection is the thing a carer cannot supply.
+    assert.ok(back.baby.needs.affection < 45, `affection should suffer while away, got ${back.baby.needs.affection.toFixed(0)}`);
+    assert.ok(back.story.chapters.length >= 1, 'chapters were written while the player was gone');
+  } finally { await gm.shutdown(); await store.close(); cleanup(); }
+});
+
+test('a short absence still runs with nobody in the house', async () => {
+  const { dir, cleanup } = tmpStore();
+  const store = await createFileStore(dir);
+  const gm = new GameManager(store);
+  try {
+    const g = await gm.create('u1', { babyName: 'Wren', sex: 'girl' });
+    await store.saveGame(g);
+    gm.games.delete(g.id);
+    const stored = await store.getGame(g.id);
+    stored.lastTickAt = Date.now() - 3 * 3600 * 1000; // 3 real hours -> 6 sim hours, under the cap
+    await store.saveGame(stored);
+    const back = await gm.load(g.id);
+    assert.ok(back.sim.time / HOUR > 5 && back.sim.time / HOUR < 7, `6 sim hours, got ${(back.sim.time / HOUR).toFixed(1)}`);
+    assert.ok(!back.journal.some((e) => e.type === 'sitter'), 'nobody steps in for a short absence');
+    assert.ok(!back.awaySummary.carer);
   } finally { await gm.shutdown(); await store.close(); cleanup(); }
 });

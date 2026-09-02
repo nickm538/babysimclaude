@@ -9,6 +9,15 @@ const REL_ICON = {
 };
 
 const bar = (v, cls = '') => `<div class="track"><div class="fill ${cls}" style="width:${Math.max(0, Math.min(100, v))}%"></div></div>`;
+// Mirrors the server's gates in applySocialAction('babysit') so the button never lies about what it will do.
+const canSit = (c, s) => c.availableNow && !s.visitor && c.relationship >= 35 && !!c.skills && c.skills.babysitting >= 0.3;
+function sitBlocker(c, s) {
+  if (s.visitor) return `${s.visitor.name} is already here`;
+  if (!c.availableNow) return `${c.name} is not free right now`;
+  if (c.relationship < 35) return `${c.name} is not close enough yet — call, visit, send photos`;
+  if (!c.skills || c.skills.babysitting < 0.3) return `${c.name} would not know what to do with a baby`;
+  return '';
+}
 const ago = (min) => (min == null ? 'never' : min < 60 ? `${Math.round(min)} min ago` : min < 1440 ? `${Math.round(min / 60)} h ago` : `${Math.round(min / 1440)} d ago`);
 
 export function renderContacts(view) {
@@ -62,7 +71,7 @@ export function renderContacts(view) {
         <button data-act="video" ${days < 60 ? 'disabled title="Too young to get much from a screen"' : ''}>Video call</button>
         <button data-act="photo">Send a photo</button>
         <button data-act="invite" ${c.availableNow && !s.visitor && !s.pendingVisit ? '' : 'disabled'}>Invite over</button>
-        <button data-act="babysit" ${c.availableNow && c.skills && c.skills.sitting > 0.25 ? '' : 'disabled'}>Ask to babysit</button>
+        <button data-act="babysit" ${canSit(c, s) ? '' : `disabled title="${escapeHtml(sitBlocker(c, s))}"`}>Ask to babysit</button>
       </div>
     </div>`;
   }

@@ -353,8 +353,7 @@ export const CHOICE_EVENTS = [
       outcomes: {
         invite: { sev: 'good', text: 'They stay an hour, hold {n} while you eat something hot for the first time in days, and leave the dish.',
           effects: { needs: { stimulation: 14, affection: 6 }, dev: { social: 0.5 }, emo: { stress: -6 }, celebrate: 7, parentEnergy: 12,
-            memory: { text: 'the neighbour who brought food when you were sinking', weight: 62 } },
-          strangerWary: true },
+            memory: { text: 'the neighbour who brought food when you were sinking', weight: 62 }, strangerWary: true } },
         decline: { sev: 'info', text: 'You take the dish at the door, say thank you twice, and close it. The house is very quiet afterwards.',
           effects: { emo: { stress: 2 }, parentEnergy: 4 } },
       },
