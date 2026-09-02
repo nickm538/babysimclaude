@@ -65,6 +65,15 @@ single replica is correct.
 - Time and safety rules are real: back to sleep, no honey before one, no water before six months, no solids before four months,
   medicine only when needed and dosed correctly, baby-proof before the baby crawls.
 
+## Testing later ages
+Set `CRADLE_DEBUG=1` on the server to enable `POST /api/games/:id/debug/advance` with `{ "days": 730 }` — it simulates a
+cared-for baby (babysitter, stocked supplies, health upkeep) day by day so you can inspect the toddler/preschooler stages quickly.
+Never enable this in production.
+
+`npm run smoke` needs Playwright to be importable: either `npm i -D playwright` (downloads Chromium) or point it at an existing install
+with `SMOKE_PW_PATH=/path/to/playwright/index.mjs` and `SMOKE_CHROME=/path/to/chrome`. `SMOKE_SHOTS=1` writes extra screenshots
+to `scripts/`.
+
 ## Tech
 Node 20+, Express, `ws`, `pg`, `bcryptjs`, Three.js 0.170 (served from `node_modules`, ES modules + import map, no bundler),
 `@anthropic-ai/sdk`. Tests use `node:test`.
