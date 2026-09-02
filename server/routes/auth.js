@@ -1,9 +1,11 @@
 import { Router } from 'express';
+import { rateLimit } from '../ratelimit.js';
 import { hashPassword, checkPassword, signToken, newId, validUsername, validPassword, authMiddleware } from '../auth.js';
 
 export function authRoutes(store) {
   const r = Router();
-  r.post('/register', async (req, res) => {
+  const limit = rateLimit({ windowMs: 60000, max: 12 });
+  r.post('/register', limit, async (req, res) => {
     const { username, password } = req.body || {};
     if (!validUsername(username)) return res.status(400).json({ error: 'Username: 3-20 letters, numbers or _' });
     if (!validPassword(password)) return res.status(400).json({ error: 'Password must be at least 4 characters' });
@@ -12,7 +14,7 @@ export function authRoutes(store) {
     await store.createUser(user);
     res.json({ token: signToken(user.id), user: { id: user.id, username } });
   });
-  r.post('/login', async (req, res) => {
+  r.post('/login', limit, async (req, res) => {
     const { username, password } = req.body || {};
     const user = username ? await store.getUserByName(String(username)) : null;
     if (!user || !(await checkPassword(String(password || ''), user.passwordHash))) return res.status(401).json({ error: 'Wrong name or password' });

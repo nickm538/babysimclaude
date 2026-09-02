@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export async function createPostgresStore(url) {
-  const pool = new pg.Pool({ connectionString: url, ssl: /localhost|127\.0\.0\.1|railway\.internal/.test(url) ? false : { rejectUnauthorized: false }, max: 8 });
+  // SSL only when asked for: Railway's private network (postgres.railway.internal) does not use TLS.
+  const useSsl = process.env.PGSSL === '1' || /sslmode=require/i.test(url);
+  const pool = new pg.Pool({ connectionString: url, ssl: useSsl ? { rejectUnauthorized: false } : false, max: 8 });
   await pool.query(fs.readFileSync(path.join(here, 'schema.sql'), 'utf8'));
   const q = (text, params) => pool.query(text, params);
   return {

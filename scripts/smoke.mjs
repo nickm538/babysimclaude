@@ -9,7 +9,7 @@ import WebSocket from 'ws';
 
 const PORT = 3457;
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cradle-smoke-'));
-const srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT, DATA_DIR: dir, DATABASE_URL: '', SESSION_SECRET: 'smoke', NODE_ENV: 'development' }, stdio: ['ignore', 'pipe', 'pipe'] });
+const srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT, DATA_DIR: dir, DATABASE_URL: '', SESSION_SECRET: 'smoke', NODE_ENV: 'development', CRADLE_DEBUG: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
 srv.stdout.on('data', (d) => process.stdout.write(`[server] ${d}`)); srv.stderr.on('data', (d) => process.stderr.write(`[server] ${d}`));
 const base = `http://127.0.0.1:${PORT}`;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -76,6 +76,15 @@ try {
     await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-chat.png') });
     await clickStep('#chat-close', 'close chat'); await wait(200);
     const temperOpened = await page.evaluate(() => { const b = [...document.querySelectorAll('.actions button')].find((x) => x.textContent.includes('Lose your temper')); if (!b) return 'nobutton'; b.click(); return 'clicked'; }); await wait(400); const hasModal = await page.evaluate(() => !!document.querySelector('#ch-cancel')); check(temperOpened === 'clicked' && hasModal, 'temper chooser opens'); if (hasModal) await page.$eval('#ch-cancel', (el) => el.click());
+    // age the baby into a toddler through the debug endpoint and make sure the model rebuilds without errors
+    await j('POST', `/api/games/${id}/actions`, { id: 'put_down', params: { location: 'play_mat', position: 'sitting' } }, u.token);
+    const aged = await j('POST', `/api/games/${id}/debug/advance`, { days: 730 }, u.token);
+    check(aged.game.sim.days > 700, `debug advance -> ${aged.game.sim.days.toFixed(0)} days, status ${aged.game.status}`);
+    await wait(4000);
+    const rebuilt = await page.evaluate(() => { const G = window.__cradle; return { days: G.baby.days, band: G.baby.builtDays, verts: G.baby.body.geometry.attributes.position.count, cap: !!G.baby.face.cap }; });
+    check(rebuilt.days > 700 && rebuilt.band >= 9, `toddler model rebuilt (band ${rebuilt.band}, ${rebuilt.verts} verts, hair cap ${rebuilt.cap})`);
+    await page.evaluate(() => { const G = window.__cradle; G.controls.colliders = []; const b = G.baby.worldPosition(); G.controls.eyeHeight = 1.1; G.controls.pos.set(b.x + 0.2, 0, b.z + 1.3); G.controls.lookAt(G.baby.headWorldPosition()); G.controls.lookWeight = 1; });
+    await wait(1500); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-toddler.png') });
 
     const shot = path.join(process.cwd(), 'scripts', 'smoke-screenshot.png'); await page.screenshot({ path: shot }); console.log('screenshot ->', shot);
     if (process.env.SMOKE_SHOTS) {

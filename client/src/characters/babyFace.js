@@ -28,7 +28,8 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
   const eyeR = R * 0.165;
   const scleraMat = new THREE.MeshPhysicalMaterial({ color: 0xf4f6fa, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 0.8 });
   const irisMat = new THREE.MeshStandardMaterial({ map: irisTexture(appearance.eyeColor || '#4a3020'), roughness: 0.35 });
-  const corneaMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, roughness: 0, thickness: 0.002, transparent: true, opacity: 0.55, ior: 1.38, envMapIntensity: 1.2 });
+  const mobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+  const corneaMat = mobile ? new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0, transparent: true, opacity: 0.25, clearcoat: 1, envMapIntensity: 1.2 }) : new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, roughness: 0, thickness: 0.002, transparent: true, opacity: 0.55, ior: 1.38, envMapIntensity: 1.2 });
   for (const sx of [-1, 1]) {
     const socket = new THREE.Group();
     socket.position.copy(onSurface(V(sx * 0.42, 0.05, 1), -eyeR * 0.62));

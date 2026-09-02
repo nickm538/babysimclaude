@@ -64,7 +64,8 @@ export function buildHouse(scene, opts = {}) {
   for (const [x, z, w, d] of [[0, -4.9, 12, 0.06], [0, 4.9, 12, 0.06], [-5.9, 0, 0.06, 10], [5.9, 0, 0.06, 10]]) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), bbMat); m.position.set(x, 0.06, z); g.add(m); }
 
   // windows: glass + frames + outside sky plane
-  const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xdfeeff, transmission: 0.92, roughness: 0.05, thickness: 0.01, transparent: true, opacity: 0.35, ior: 1.45 });
+  const mobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+  const glassMat = mobile ? new THREE.MeshPhysicalMaterial({ color: 0xdfeeff, roughness: 0.05, transparent: true, opacity: 0.22, metalness: 0.1 }) : new THREE.MeshPhysicalMaterial({ color: 0xdfeeff, transmission: 0.92, roughness: 0.05, thickness: 0.01, transparent: true, opacity: 0.35, ior: 1.45 });
   const frameMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
   const mkWindow = (cx, cy, cz, w, h, rotY) => {
     const grp = new THREE.Group(); grp.position.set(cx, cy, cz); grp.rotation.y = rotY;
