@@ -7,7 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import WebSocket from 'ws';
 
-const PORT = 3457;
+const PORT = Number(process.env.SMOKE_PORT) || 3457;
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cradle-smoke-'));
 const srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT, DATA_DIR: dir, DATABASE_URL: '', SESSION_SECRET: 'smoke', NODE_ENV: 'development', CRADLE_DEBUG: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
 srv.stdout.on('data', (d) => process.stdout.write(`[server] ${d}`)); srv.stderr.on('data', (d) => process.stderr.write(`[server] ${d}`));
