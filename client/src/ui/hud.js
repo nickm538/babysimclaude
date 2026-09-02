@@ -91,7 +91,11 @@ export class HUD {
     this.$('hud-mood').innerHTML = `${icon(ACTIVITY_ICON[mood] || 'faceNeutral')}<span>${escapeHtml((MOOD_TEXT[mood] || mood) + cause)}</span>`;
     this.mood.update(view);
     for (const btn of this.speedEl.children) btn.classList.toggle('on', Number(btn.dataset.s) === view.settings.timeScale);
-    this.$('conn').classList.toggle('on', store.status === 'online');
+    // The dot is the one place the player can see that the game is live AND being written down.
+    const conn = this.$('conn'), live = store.status === 'online', saving = store.save !== 'failing';
+    conn.classList.toggle('on', live && saving);
+    conn.classList.toggle('unsaved', live && !saving);
+    conn.title = !live ? 'Offline — reconnecting' : saving ? 'Connected · progress saved' : `Connected, but the server cannot save (${store.saveAttempts} attempts)`;
     this.renderHint(view);
   }
 

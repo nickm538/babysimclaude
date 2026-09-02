@@ -58,6 +58,8 @@ input:focus { border-color: var(--accent2); }
 .topbar .spacer { flex: 1; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
 .dot.on { background: var(--good); }
+/* Connected, but the server cannot write to the database — the game is live and not being saved. */
+.dot.unsaved { background: var(--warn); animation: pulse 1.4s infinite; }
 .speed { display: flex; gap: 2px; }
 .speed button { padding: 4px 8px; font-size: 12px; border-radius: 8px; }
 .speed button.on { background: var(--accent); color: #1a1208; font-weight: 700; }

@@ -51,6 +51,9 @@ export async function createPostgresStore(url) {
 
   const q = (text, params) => pool.query(text, params);
   let pruneCounter = 0;
+  // Warn once per game per process. Kept out here rather than on the game object, which is the thing
+  // being serialised — a flag stored there would be written into the save.
+  const sizeWarned = new Set();
 
   return {
     kind: 'postgres',
@@ -62,8 +65,8 @@ export async function createPostgresStore(url) {
 
     async saveGame(g) {
       const state = JSON.stringify(g);
-      if (state.length > WARN_STATE_BYTES && !g._sizeWarned) {
-        g._sizeWarned = true;
+      if (state.length > WARN_STATE_BYTES && !sizeWarned.has(g.id)) {
+        sizeWarned.add(g.id);
         console.warn(`[db] game ${g.id} state is ${(state.length / 1048576).toFixed(2)} MB — check the journal/story/notification caps`);
       }
       await q(

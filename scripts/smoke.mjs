@@ -9,7 +9,11 @@ import WebSocket from 'ws';
 
 const PORT = Number(process.env.SMOKE_PORT) || 3457;
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cradle-smoke-'));
-const srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT, DATA_DIR: dir, DATABASE_URL: '', SESSION_SECRET: 'smoke', NODE_ENV: 'development', CRADLE_DEBUG: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+// Defaults to the JSON file store so the smoke needs no database. Set SMOKE_DATABASE_URL to run the
+// whole thing against a real Postgres instead — that is the path Railway takes, so it is worth
+// exercising before a deploy.
+const smokeDb = process.env.SMOKE_DATABASE_URL || '';
+const srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT, DATA_DIR: dir, DATABASE_URL: smokeDb, SESSION_SECRET: 'smoke', NODE_ENV: 'development', CRADLE_DEBUG: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
 srv.stdout.on('data', (d) => process.stdout.write(`[server] ${d}`)); srv.stderr.on('data', (d) => process.stderr.write(`[server] ${d}`));
 const base = `http://127.0.0.1:${PORT}`;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -12,7 +12,7 @@ export class GameSocket {
     ws.onopen = () => { this.retry = 0; this.h.status?.('online'); };
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
-      if (m.type === 'state') { this.h.state?.(m.view, m.events || []); }
+      if (m.type === 'state') { this.h.state?.(m.view, m.events || [], m); }
       else if (m.type === 'action_result') { const p = this.pending.get(m.reqId); if (p) { this.pending.delete(m.reqId); p(m); } }
       else if (m.type === 'playdate') this.h.playdate?.(m);
     };

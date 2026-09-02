@@ -177,3 +177,67 @@ test('a short absence still runs with nobody in the house', async () => {
     assert.ok(!back.awaySummary.carer);
   } finally { await gm.shutdown(); await store.close(); cleanup(); }
 });
+
+test('a failed save is retried, never recorded as success, and never loses the game', async () => {
+  const { dir, cleanup } = tmpStore();
+  const store = await createFileStore(dir);
+  const gm = new GameManager(store);
+  try {
+    const g = await gm.create('u1', { babyName: 'Flaky', sex: 'girl', id: 'flaky-1' });
+    const entry = gm.games.get(g.id);
+    const realSave = store.saveGame.bind(store);
+    let fails = 0;
+    store.saveGame = async (game) => { fails++; throw new Error('database is down'); };
+
+    await gm.act(g.id, 'hold', {});
+    assert.ok(fails > 0, 'a save was attempted');
+    assert.equal(entry.dirty, true, 'the game is still marked unsaved');
+    assert.ok(entry.saveFails >= 1, 'the failure is counted');
+    const savedAt = entry.lastSave;
+
+    await gm.act(g.id, 'cuddle', {});
+    assert.equal(entry.lastSave, savedAt, 'a failed write never advances lastSave');
+    assert.equal(entry.dirty, true);
+
+    // Eviction must not drop a game that has not been written yet.
+    entry.subscribers.clear();
+    entry.lastTouch = Date.now() - 10 * 60 * 1000;
+    await gm.tick();
+    assert.ok(gm.games.has(g.id), 'an unsaved game is kept in memory rather than discarded');
+
+    // Once the database comes back, the next save lands and the flags clear.
+    store.saveGame = realSave;
+    await gm.persist(entry, [], true);
+    assert.equal(entry.dirty, false, 'the retry succeeded');
+    assert.equal(entry.saveFails, 0, 'the failure counter resets');
+    assert.ok(entry.lastSave > 0);
+    const back = await store.getGame(g.id);
+    assert.ok(back && back.baby.name === 'Flaky', 'and everything that happened while it was down is in the save');
+    assert.ok(back.journal.some((e) => e.type === 'cuddle' || e.type === 'hold'), 'including the actions taken during the outage');
+  } finally { await gm.shutdown(); await store.close(); cleanup(); }
+});
+
+test('one game failing to save does not stop the others from ticking', async () => {
+  const { dir, cleanup } = tmpStore();
+  const store = await createFileStore(dir);
+  const gm = new GameManager(store);
+  try {
+    const bad = await gm.create('u1', { babyName: 'Bad', sex: 'girl', id: 'bad-1' });
+    const good = await gm.create('u1', { babyName: 'Good', sex: 'boy', id: 'good-1' });
+    // Both need a subscriber for tickOne to advance them.
+    const fakeWs = { readyState: 1, send() {} };
+    for (const id of [bad.id, good.id]) {
+      const e = gm.games.get(id);
+      e.subscribers.add(fakeWs);
+      e.game.lastTickAt = Date.now() - 5000;
+      e.lastSave = Date.now() - 60000; // past the 15s save interval, so the tick will try to write
+    }
+    store.saveGame = async (g) => { if (g.id === bad.id) throw new Error('only this one is broken'); };
+    const before = good.sim.time;
+    await gm.tick();
+    assert.ok(good.sim.time > before, 'the healthy game still advanced');
+    assert.ok(gm.games.get(bad.id).saveFails >= 1, 'and the broken one recorded its failure');
+    assert.equal(gm.games.get(bad.id).dirty, true, 'the broken one is still marked unsaved');
+    assert.equal(gm.games.get(good.id).dirty, false, 'the healthy one saved cleanly');
+  } finally { await gm.shutdown(); await store.close(); cleanup(); }
+});

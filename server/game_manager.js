@@ -77,28 +77,64 @@ export class GameManager {
   async tick() {
     const now = Date.now();
     for (const [id, entry] of this.games) {
-      const g = entry.game;
-      if (entry.subscribers.size === 0) {
-        if (now - entry.lastTouch > 5 * 60 * 1000) { await this.persist(entry, [], true); this.games.delete(id); }
-        continue;
-      }
-      if (g.status !== 'active') { g.lastTickAt = now; continue; }
-      const realDt = Math.min(30, (now - g.lastTickAt) / 1000);
-      g.lastTickAt = now;
-      const b = g.baby;
-      let scale = g.settings.timeScale || TIME.ONLINE_SCALE_DEFAULT;
-      if (g.settings.sleepBoost && b.state.activity === 'sleeping' && !b.state.cryingSince && b.state.hospitalizedUntil <= g.sim.time) scale *= TIME.SLEEP_BOOST;
-      if (b.state.hospitalizedUntil > g.sim.time) scale *= 4;
-      const events = advance(g, realDt * scale, { offline: false });
-      this.broadcast(entry, events);
-      const important = events.some((e) => e.sev === 'danger' || e.sev === 'good');
-      await this.persist(entry, events, important || now - entry.lastSave > 15000);
+      // One game throwing must never stop the others from ticking.
+      try { await this.tickOne(id, entry, now); } catch (e) { console.error(`[tick] game ${id}:`, e.message); }
     }
   }
 
+  async tickOne(id, entry, now) {
+    const g = entry.game;
+    if (entry.subscribers.size === 0) {
+      // Only evict once the last write actually landed, or an unsaved game would vanish with it.
+      if (now - entry.lastTouch > 5 * 60 * 1000) {
+        await this.persist(entry, [], true);
+        if (!entry.dirty) this.games.delete(id);
+      }
+      return;
+    }
+    if (g.status !== 'active') { g.lastTickAt = now; return; }
+    const realDt = Math.min(30, (now - g.lastTickAt) / 1000);
+    g.lastTickAt = now;
+    const b = g.baby;
+    let scale = g.settings.timeScale || TIME.ONLINE_SCALE_DEFAULT;
+    if (g.settings.sleepBoost && b.state.activity === 'sleeping' && !b.state.cryingSince && b.state.hospitalizedUntil <= g.sim.time) scale *= TIME.SLEEP_BOOST;
+    if (b.state.hospitalizedUntil > g.sim.time) scale *= 4;
+    const events = advance(g, realDt * scale, { offline: false });
+    this.broadcast(entry, events);
+    const important = events.some((e) => e.sev === 'danger' || e.sev === 'good');
+    await this.persist(entry, events, important || entry.dirty || now - entry.lastSave > 15000);
+  }
+
+  // Saving is the whole point of a game that runs in real time, so a failed write must not be
+  // silently dropped, must not be recorded as a success, and must not take the other games down with
+  // it. Saves for one game are serialised behind entry.saving so a slow write cannot interleave with
+  // the next one.
   async persist(entry, events, force) {
-    if (events.length) { try { await this.store.appendEvents(entry.game.id, events); } catch (e) { console.error('[events]', e.message); } }
-    if (force) { entry.lastSave = Date.now(); await this.store.saveGame(entry.game); }
+    if (events.length) {
+      // The event log is history, not state: losing a batch costs a line in the journal, not progress.
+      try { await this.store.appendEvents(entry.game.id, events); } catch (e) { console.error('[events]', e.message); }
+    }
+    if (!force) return;
+    entry.dirty = true;
+    entry.saving = (entry.saving || Promise.resolve()).then(async () => {
+      if (!entry.dirty) return;
+      try {
+        await this.store.saveGame(entry.game);
+        entry.dirty = false;
+        entry.lastSave = Date.now();
+        if (entry.saveFails) {
+          console.log(`[db] game ${entry.game.id} saved again after ${entry.saveFails} failure(s)`);
+          entry.saveFails = 0;
+          this.broadcast(entry, [], { save: 'ok' });
+        }
+      } catch (e) {
+        entry.saveFails = (entry.saveFails || 0) + 1;
+        console.error(`[db] save failed for game ${entry.game.id} (${entry.saveFails}):`, e.message);
+        // Tell the player rather than letting them play on believing it is being written down.
+        if (entry.saveFails === 1 || entry.saveFails % 10 === 0) this.broadcast(entry, [], { save: 'failing', attempts: entry.saveFails });
+      }
+    });
+    await entry.saving;
   }
 
   async act(id, actionId, params) {
@@ -138,9 +174,11 @@ export class GameManager {
 
   view(id) { const e = this.games.get(id); return e ? gameView(e.game) : null; }
 
-  broadcast(entry, events) {
+  // `extra` rides along on the state frame; it currently carries save health so the client can tell
+  // the player when their progress has stopped being written.
+  broadcast(entry, events, extra) {
     if (!entry || entry.subscribers.size === 0) return;
-    const msg = JSON.stringify({ type: 'state', view: gameView(entry.game), events });
+    const msg = JSON.stringify({ type: 'state', view: gameView(entry.game), events, ...(extra || {}) });
     for (const ws of entry.subscribers) { if (ws.readyState === 1) ws.send(msg); }
   }
 

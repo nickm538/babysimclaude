@@ -40,7 +40,24 @@ async function main() {
   app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: 'Server error' }); void next; });
 
   server.listen(PORT, () => console.log(`[cradle] listening on :${PORT}  db=${store.kind}  llm=${llmAvailable() ? 'anthropic' : 'rules-only (set ANTHROPIC_API_KEY)'}`));
-  const stop = async () => { console.log('[cradle] shutting down'); await gm.shutdown(); await store.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000); };
-  process.on('SIGTERM', stop); process.on('SIGINT', stop);
+  // Railway sends SIGTERM on every redeploy, so this is the normal way the process ends: flush every
+  // in-memory game before going away. It must be idempotent (a second signal must not start a second
+  // flush) and must still exit if the database is the thing that is unwell.
+  let stopping = false;
+  const stop = async (signal) => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`[cradle] ${signal} — saving ${gm.games.size} in-memory game(s) and shutting down`);
+    const hardExit = setTimeout(() => { console.error('[cradle] shutdown timed out — exiting anyway'); process.exit(1); }, 10000);
+    hardExit.unref();
+    try { await gm.shutdown(); } catch (e) { console.error('[cradle] shutdown save failed:', e.message); }
+    try { await store.close(); } catch (e) { console.error('[cradle] store close failed:', e.message); }
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  };
+  process.on('SIGTERM', () => stop('SIGTERM'));
+  process.on('SIGINT', () => stop('SIGINT'));
+  // A rejection nobody handled should be loud in the logs, not a silent process death on Node 22.
+  process.on('unhandledRejection', (e) => console.error('[cradle] unhandled rejection:', e && e.message ? e.message : e));
 }
 main().catch((e) => { console.error(e); process.exit(1); });

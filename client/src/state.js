@@ -1,6 +1,8 @@
 // Tiny observable store shared by the 3D scene and the UI.
 export const store = {
   view: null, catalog: null, user: null, gameId: null, status: 'offline', llm: false,
+  // 'ok' | 'failing' — whether the server is still writing this game to the database.
+  save: 'ok', saveAttempts: 0, savedAt: 0,
   toasts: [], listeners: new Map(), lastEvents: [], awaySummary: null, playdate: null, holding: null, nearBaby: false,
   on(evt, fn) { if (!this.listeners.has(evt)) this.listeners.set(evt, new Set()); this.listeners.get(evt).add(fn); return () => this.listeners.get(evt).delete(fn); },
   emit(evt, data) { const s = this.listeners.get(evt); if (s) for (const fn of s) { try { fn(data); } catch (e) { console.error(e); } } },

@@ -50,7 +50,22 @@ async function startGame(gameId, fresh) {
   const unlock = () => { G.audio.init(); window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
   window.addEventListener('pointerdown', unlock); window.addEventListener('keydown', unlock);
   G.socket = new GameSocket(api.token, gameId, {
-    state: (v, events) => { store.status = 'online'; store.setView(v, events); },
+    state: (v, events, frame) => {
+      store.status = 'online';
+      if (frame && frame.save) {
+        const was = store.save;
+        store.save = frame.save;
+        store.saveAttempts = frame.attempts || 0;
+        if (frame.save === 'failing' && was !== 'failing') {
+          store.toast(`The server can't save ${v.baby.name}'s progress right now. It keeps retrying — don't close the game.`, 'danger', 12000);
+        } else if (frame.save === 'ok' && was === 'failing') {
+          store.toast('Saving again — nothing was lost.', 'good', 6000);
+        }
+      } else if (store.save === 'ok') {
+        store.savedAt = Date.now();
+      }
+      store.setView(v, events);
+    },
     status: (s) => { store.status = s; if (store.view) store.emit('view', { view: store.view, prev: store.view, events: [] }); },
     playdate: (m) => handlePlaydate(G, m),
   });
