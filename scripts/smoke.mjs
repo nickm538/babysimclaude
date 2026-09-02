@@ -55,6 +55,28 @@ try {
     const info = await page.evaluate(() => { const G = window.__cradle; const gl = document.getElementById('gl'); return { built: !!(G && G.baby && G.baby.body), verts: G && G.baby && G.baby.body ? G.baby.body.geometry.attributes.position.count : 0, hud: !!document.querySelector('.topbar'), size: [gl.width, gl.height], hasBars: !!document.getElementById('bar-fullness') }; });
     check(info.built, `baby mesh built (${info.verts} vertices)`);
     check(info.hud && info.hasBars, 'HUD rendered');
+    // click through the phone tabs, the shop cart, the chat and the temper chooser
+    const clickStep = async (sel, label) => { try { const n = await page.$$eval(sel, (els) => { if (!els.length) throw new Error('not found'); if (els[0].disabled) throw new Error('disabled'); els[0].click(); return els.length; }); void n; return true; } catch (e) { await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-fail.png') }); check(false, `${label}: ${String(e.message).split('\n')[0]}`); return false; } };
+    await clickStep('#fab-phone', 'open phone'); await wait(300);
+    const tabs = ['baby', 'health', 'shop', 'wardrobe', 'school', 'home', 'friends', 'journal', 'settings'];
+    const tabLens = {};
+    for (const t of tabs) { await clickStep(`[data-tab="${t}"]`, 'tab ' + t); await wait(150); tabLens[t] = await page.evaluate(() => document.querySelector('#ph-body').innerHTML.length); }
+    check(Object.values(tabLens).every((n) => n > 200), `phone tabs render (${Object.entries(tabLens).map(([k, v]) => k + ':' + v).join(' ')})`);
+    await clickStep('[data-tab="shop"]', 'shop tab'); await wait(150);
+    await clickStep('[data-item="wipes"] [data-add]', 'add to cart'); await wait(100); await clickStep('[data-cart-order]', 'order'); await wait(600);
+    const ordered = await page.evaluate(() => (window.__cradle && document.body.innerText.includes('Order placed')) || document.querySelectorAll('.toast').length > 0);
+    check(ordered, 'shop order from the phone');
+    await clickStep('[data-tab="baby"]', 'baby tab'); await wait(200); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-phone.png') });
+    await clickStep('#ph-close', 'close phone'); await wait(200);
+    await clickStep('#fab-chat', 'open chat'); await wait(400);
+    try { await page.$eval('#chat-input', (el) => { el.value = 'hello little one, mama is here'; }); } catch (e) { check(false, 'chat input: ' + e.message.split('\n')[0]); }
+    await clickStep('#chat-form button[type=submit]', 'send chat'); await wait(1500);
+    const chatOk = await page.evaluate(() => document.querySelectorAll('.msg.baby').length >= 1 && document.querySelectorAll('.msg.parent').length >= 1);
+    check(chatOk, 'chat panel round-trip');
+    await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-chat.png') });
+    await clickStep('#chat-close', 'close chat'); await wait(200);
+    const temperOpened = await page.evaluate(() => { const b = [...document.querySelectorAll('.actions button')].find((x) => x.textContent.includes('Lose your temper')); if (!b) return 'nobutton'; b.click(); return 'clicked'; }); await wait(400); const hasModal = await page.evaluate(() => !!document.querySelector('#ch-cancel')); check(temperOpened === 'clicked' && hasModal, 'temper chooser opens'); if (hasModal) await page.$eval('#ch-cancel', (el) => el.click());
+
     const shot = path.join(process.cwd(), 'scripts', 'smoke-screenshot.png'); await page.screenshot({ path: shot }); console.log('screenshot ->', shot);
     if (process.env.SMOKE_SHOTS) {
       // put the baby in the crib and look at it from the nursery; then a close-up of the face

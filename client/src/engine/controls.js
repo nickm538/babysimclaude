@@ -5,7 +5,7 @@ import * as THREE from 'three';
 export class FirstPersonControls {
   constructor(camera, dom, { colliders = [], eyeHeight = 1.62, bounds = { minX: -5.6, maxX: 5.6, minZ: -4.6, maxZ: 4.6 } } = {}) {
     this.camera = camera; this.dom = dom; this.colliders = colliders; this.eyeHeight = eyeHeight; this.bounds = bounds;
-    this.yaw = Math.PI; this.pitch = -0.08; // looking toward -z
+    this.yaw = 0; this.pitch = -0.08; // yaw 0 looks down -z, toward the TV and nursery
     this.pos = new THREE.Vector3(camera.position.x, 0, camera.position.z);
     this.vel = new THREE.Vector3();
     this.keys = new Set();
