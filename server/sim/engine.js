@@ -6,6 +6,8 @@ import {
 import { makeRng } from './rng.js';
 import { updateIllness, rollIllnessOnset } from './health.js';
 import { roamAndHazards, runBabysitter } from './events.js';
+import { rollStoryEvents } from './story.js';
+import { socialTick } from './social.js';
 
 export function ageDays(game) { return game.sim.time / DAY; }
 export function clockSeconds(game) { return (TIME.BIRTH_CLOCK + game.sim.time) % DAY; }
@@ -128,8 +130,10 @@ function step(game, dt, opts, rng) {
 
   // --- babysitter, roaming, hazards, orders ---
   if (sitter) runBabysitter(game, dtH, rng);
+  socialTick(game, dtH, rng);
   roamAndHazards(game, dt, rng, days, supervised && !sitter, opts.offline);
   updateOrders(game, t0, t);
+  rollStoryEvents(game, dtH, rng, opts);
 
   // --- outcome ---
   if (n.health <= 0 && game.status === 'active') die(game, deathCause(game));
@@ -190,13 +194,20 @@ function updateSleep(game, dt, rng, days, supervised) {
     n.rest = clamp(n.rest + dtH * gain);
     const distress = distressOf(game, days).value;
     let wake = false, why = '';
+    // A deeply exhausted baby sleeps through more; the threshold rises as sleep debt is repaid.
+    const wakeThreshold = 72 + Math.max(0, 30 - n.rest) * 1.2;
     if (n.rest >= 96) { wake = true; why = 'rested'; }
-    else if (n.fullness < 28) { wake = true; why = 'hungry'; }
-    else if (distress > 72) { wake = true; why = 'uncomfortable'; }
+    else if (n.fullness < 28 && n.rest > 20) { wake = true; why = 'hungry'; }
+    else if (distress > wakeThreshold) { wake = true; why = 'uncomfortable'; }
     else if (n.rest > 55 && rng.chance((days < 120 ? 0.05 : 0.02) * (distress > 40 ? 3 : 1))) { wake = true; why = 'stirred'; }
     else if (days >= 365 && !isNight(game) && n.rest > 80 && rng.chance(0.15)) { wake = true; why = 'nap over'; }
     if (wake) {
       s.activity = 'awake'; s.awakeSince = t; s.sleepSince = null; b.wear.swaddled = false;
+      if (game.story && game.story.stats) {
+        const st = game.story.stats; st.wakes++;
+        const hr = clockSeconds(game) / HOUR;
+        if (hr >= 23 || hr < 5) st.nightWakes++; else if (hr < 6.5) st.earlyWakes++;
+      }
       log(game, 'woke', `${b.name} woke up (${why}).`, 'info');
     }
     return;
@@ -205,7 +216,7 @@ function updateSleep(game, dt, rng, days, supervised) {
   const calm = !s.cryingSince && n.fullness > 35 && n.diaper > 30 && n.comfort > 45;
   let p = 0;
   if (n.rest < 28 && calm) p = 0.22 + (s.held ? 0.2 : 0) + (s.whiteNoise ? 0.05 : 0) + (b.wear.swaddled && days < 60 ? 0.08 : 0);
-  else if (n.rest < 12) p = s.held ? 0.18 : 0.06;
+  else if (n.rest < 12) p = (s.held ? 0.18 : 0.06) + (12 - n.rest) * 0.035; // exhaustion eventually wins
   else if (n.rest < 45 && isNight(game) && days >= 365 && calm) p = 0.08;
   if (s.location === 'high_chair' || s.location === 'bath' || s.location === 'changing_table') p *= 0.2;
   if (p > 0 && rng.chance(p)) {
@@ -376,14 +387,24 @@ function updateHealth(game, dtH, sleeping, days) {
   const b = game.baby, n = b.needs, e = b.emo;
   const okNeeds = n.fullness > 40 && n.rest > 30 && n.diaper > 30 && n.clean > 40;
   let delta = 0;
-  if (okNeeds && !b.illness) delta += 0.6;
-  else if (!b.illness && n.fullness > 25) delta += 0.15;
+  // Baseline recovery. A well-cared-for body keeps healing even while fighting something off, and
+  // convalescence is faster the further health has fallen — otherwise a run of ordinary childhood
+  // infections would grind a well-parented baby to zero.
+  if (okNeeds) delta += b.illness ? 0.3 : 0.6;
+  else if (n.fullness > 25) delta += b.illness ? 0.08 : 0.15;
+  if (okNeeds && n.health < 75) delta += (75 - n.health) * 0.012;
   if (n.fullness < 10) delta -= (10 - n.fullness) * 0.12;
   if (n.fullness < 25 && days < 60) delta -= 0.15;
   if (n.rest < 5) delta -= 0.15;
   if (b.phys.rash > 60) delta -= 0.15;
   if (b.phys.nutrition < 0.88) delta -= 0.35;
-  if (b.illness && b.illness.severity > 50) delta -= (b.illness.severity / 100) * 1.2 * (ILL_DANGER(b.illness.id));
+  if (b.illness && b.illness.severity > 45) {
+    // Only the severe part of an illness costs health, and getting it treated more than halves the toll.
+    const bite = (b.illness.severity - 45) / 55;
+    const care = b.illness.treated ? 0.42 : 1;
+    const supported = okNeeds ? 0.85 : 1.25;
+    delta -= bite * 1.35 * ILL_DANGER(b.illness.id) * care * supported;
+  }
   if (e.stress > 70) delta -= 0.1;
   if (b.injuries.some((i) => i.healAt > game.sim.time && i.severe)) delta -= 0.25;
   n.health = clamp(n.health + delta * dtH);

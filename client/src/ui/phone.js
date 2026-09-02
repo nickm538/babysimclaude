@@ -1,5 +1,7 @@
 // The "phone": a tabbed sheet for everything done remotely — stats, health & doctor, shop, wardrobe, school, home, friends, journal, settings.
 import { store } from '../state.js';
+import { renderContacts, bindContacts } from './contacts.js';
+import { storyHtml } from './story.js';
 import { api } from '../net/api.js';
 import { NEED_LABELS, EMOTION_KEYS, DEV_KEYS, ageLabel, CLOTHING_SIZES, DIAPER_SIZES } from '/shared/constants.js';
 
@@ -16,7 +18,7 @@ export class Phone {
 
   render() {
     const v = store.view; if (!v || !this.el) return;
-    const tabs = [['baby', '👶 Baby'], ['health', '🩺 Health'], ['shop', '🛒 Shop'], ['wardrobe', '👕 Wardrobe'], ['school', '🎓 School'], ['home', '🏠 Home'], ['friends', '👯 Friends'], ['journal', '📓 Journal'], ['settings', '⚙️']];
+    const tabs = [['baby', '👶 Baby'], ['health', '🩺 Health'], ['shop', '🛒 Shop'], ['wardrobe', '👕 Wardrobe'], ['school', '🎓 School'], ['home', '🏠 Home'], ['contacts', '👪 Family'], ['friends', '👯 Friends'], ['story', '📖 Story'], ['settings', '⚙️']];
     this.el.innerHTML = `<div class="panel"><div class="tabs">${tabs.map(([id, l]) => `<button class="${id === this.tab ? 'on' : ''}" data-tab="${id}">${l}</button>`).join('')}</div><button class="close" id="ph-close">✕</button><div class="body" id="ph-body"></div></div>`;
     for (const b of this.el.querySelectorAll('[data-tab]')) b.onclick = () => { this.tab = b.dataset.tab; this.render(); };
     this.el.querySelector('#ph-close').onclick = () => this.close();
@@ -128,6 +130,12 @@ export class Phone {
     return `<div class="section journal"><h3>Journal</h3>${v.journal.slice().reverse().map((e) => `<div class="e ${e.sev}"><small>${fmt(e.t)}</small>${e.text}</div>`).join('')}</div>`;
   }
 
+  tab_contacts(v) { return renderContacts(v, this); }
+
+  tab_story(v) { return storyHtml(v); }
+
+  tab_journal(v) { return storyHtml(v); }
+
   tab_settings(v) {
     return `<div class="section"><h3>Time</h3><p>Speed while you play: <b>${v.settings.timeScale}×</b> (1 real hour = ${(v.settings.timeScale / 24).toFixed(2)} baby days). While you're away the baby lives at 2× real time, up to 24 hours per absence.</p>
       <div class="seg">${[1, 6, 24, 60].map((s) => `<button class="${v.settings.timeScale === s ? 'on' : ''}" data-speed="${s}">${s}×</button>`).join('')}</div>
@@ -138,6 +146,7 @@ export class Phone {
   }
 
   bind(body, v) {
+    if (this.tab === 'contacts') bindContacts(body, v, { refresh: () => this.render() });
     const run = (id, params, opts) => this.ctx.run(id, params, opts);
     body.querySelectorAll('[data-act]').forEach((b) => b.onclick = () => {
       const act = b.dataset.act;

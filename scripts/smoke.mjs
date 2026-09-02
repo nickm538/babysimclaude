@@ -58,7 +58,7 @@ try {
     // click through the phone tabs, the shop cart, the chat and the temper chooser
     const clickStep = async (sel, label) => { try { const n = await page.$$eval(sel, (els) => { if (!els.length) throw new Error('not found'); if (els[0].disabled) throw new Error('disabled'); els[0].click(); return els.length; }); void n; return true; } catch (e) { await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-fail.png') }); check(false, `${label}: ${String(e.message).split('\n')[0]}`); return false; } };
     await clickStep('#fab-phone', 'open phone'); await wait(300);
-    const tabs = ['baby', 'health', 'shop', 'wardrobe', 'school', 'home', 'friends', 'journal', 'settings'];
+    const tabs = ['baby', 'health', 'shop', 'wardrobe', 'school', 'home', 'contacts', 'friends', 'story', 'settings'];
     const tabLens = {};
     for (const t of tabs) { await clickStep(`[data-tab="${t}"]`, 'tab ' + t); await wait(150); tabLens[t] = await page.evaluate(() => document.querySelector('#ph-body').innerHTML.length); }
     check(Object.values(tabLens).every((n) => n > 200), `phone tabs render (${Object.entries(tabLens).map(([k, v]) => k + ':' + v).join(' ')})`);

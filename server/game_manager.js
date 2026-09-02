@@ -5,6 +5,7 @@ import { createGame } from './sim/state.js';
 import { advance } from './sim/engine.js';
 import { applyAction, placeOrder } from './sim/actions.js';
 import { gameView } from './sim/view.js';
+import { writeChapterNow, ensureStory } from './sim/story.js';
 
 export class GameManager {
   constructor(store) {
@@ -15,6 +16,7 @@ export class GameManager {
 
   async create(userId, opts) {
     const game = createGame({ userId, ...opts });
+    ensureStory(game);
     game.journal.push({ t: 0, type: 'home', text: `You brought ${game.baby.name} home. ${game.baby.sex === 'girl' ? 'She' : 'He'} is asleep in the crib. Everything starts now.`, sev: 'good' });
     await this.store.saveGame(game);
     this.games.set(game.id, { game, subscribers: new Set(), lastSave: Date.now(), lastTouch: Date.now() });
@@ -44,7 +46,9 @@ export class GameManager {
     const events = advance(g, simSeconds, { offline: true });
     const hours = (g.sim.time - before) / 3600;
     g.journal.push({ t: g.sim.time, type: 'return_home', text: `You were away for ${hours >= 1 ? `${hours.toFixed(1)} hours` : `${Math.round(hours * 60)} minutes`} of ${g.baby.name}'s life.`, sev: 'info' });
+    const chapter = writeChapterNow(g, 'away', 0.25);
     g.awaySummary = summarizeAway(g, events, hours);
+    if (chapter) { g.awaySummary.chapter = chapter.summary; g.awaySummary.chapterTitle = `Chapter ${chapter.index}: ${chapter.title}`; }
     await this.persist(entry, events, true);
     return events;
   }

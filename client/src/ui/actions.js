@@ -67,6 +67,13 @@ export function contextActions(ctx) {
   if (near.changing_table && !sleeping) add('👕 Dress / change outfit', 'ui:wardrobe', {}, { anim: 'none' });
   if (!sleeping) {
     add('🎵 Sing', 'sing', {}, { anim: held ? 'hold' : 'none', dur: dur('sing'), look: true });
+    add('👀 Watch them', 'observe', {}, { anim: 'none', dur: 3, look: true });
+    add('🙈 Play together…', 'ui:play2', {}, { anim: 'none' });
+    if (days >= 150) add('🗣️ Learn together…', 'ui:learn', {}, { anim: 'none' });
+    if (days >= 180) add('🥑 Introduce an allergen…', 'ui:allergen', {}, { anim: 'none' });
+    if (days >= 420) add('🧭 Guide behaviour…', 'ui:discipline', {}, { anim: 'none' });
+    if (days >= 600) add('🧹 Chores together…', 'ui:chores', {}, { anim: 'none' });
+    if (near.door && days >= 30) add('🚼 Stroller walk', 'stroller_walk', {}, { anim: 'none', dur: 25 });
     if (b.ageToys.length) add('🧸 Play', 'ui:play', {}, { anim: 'none' });
     if (inv.toys.some((t) => t.includes('book'))) add('📖 Read', 'read', {}, { anim: 'item', item: 'book', dur: dur('read'), look: true });
     if (days < 365 && !held) add('🐢 Tummy time', 'tummy_time', {}, { anim: 'none', dur: dur('tummy_time'), look: true });
@@ -78,6 +85,7 @@ export function contextActions(ctx) {
   if (days < 90 || b.wear.swaddled) add(b.wear.swaddled ? '🧣 Unswaddle' : '🧣 Swaddle', 'swaddle', {}, { anim: 'item', item: 'cloth', dur: dur('swaddle') });
   if (inv.white_noise > 0 || st.whiteNoise) add(st.whiteNoise ? '🔇 White noise off' : '🔊 White noise', 'white_noise', {}, { anim: 'none' });
   if (inv.thermometer > 0) add('🌡️ Temperature', 'check_temp', {}, { anim: 'item', item: 'thermometer', dur: dur('check_temp') });
+  add('🧺 Care…', 'ui:care', {}, { anim: 'none' });
   add('💊 Medicine…', 'ui:medicine', {}, { anim: 'none' });
   add('😤 Lose your temper…', 'ui:temper', {}, { anim: 'none', cls: 'danger' });
   return out;

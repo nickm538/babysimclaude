@@ -14,6 +14,9 @@ import { contextActions } from './ui/actions.js';
 import { Phone } from './ui/phone.js';
 import { Chat } from './ui/chat.js';
 import { authScreen, gameSelectScreen, awayModal, deathModal, winModal, chooserModal } from './ui/screens.js';
+import { NotificationCenter } from './ui/notifications.js';
+import { buildArt } from './world/art.js';
+import { chooseWord, chooseAllergen, chooseDiscipline, choosePlayActivity, chooseLearn, chooseCare, chooseChores, showObservation, ACTION_DUR } from './ui/interactions.js';
 
 const $boot = document.getElementById('boot'), $status = document.getElementById('boot-status');
 const ui = document.getElementById('ui'), overlay = document.getElementById('overlay');
@@ -74,8 +77,21 @@ function buildWorld(view) {
     onPhone: () => { G.phone.toggle(); },
     onChat: () => { G.chat.toggle(); },
     onGoTo: () => goTo(G, 'baby'),
+    onAlerts: () => { G.alerts.markAllSeen(); G.phone.open('story'); },
+    onMood: () => G.phone.open('baby'),
   });
   G.hud = hud;
+  const alertsHost = document.getElementById('alerts') || (() => { const d = document.createElement('div'); d.id = 'alerts'; ui.appendChild(d); return d; })();
+  G.alerts = new NotificationCenter(alertsHost, {
+    onOpen: () => G.phone.open('story'),
+    onCta: (cta) => { if (!cta) return; if (String(cta.action).startsWith('ui:')) uiAction(G, String(cta.action).slice(3), cta.params); else runAction(G, cta.action, cta.params || {}, { anim: 'none', remote: true }); },
+    audio, vibrate: (ms) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } },
+    effects: () => G.effects,
+    babyHead: () => baby.headWorldPosition(),
+  });
+  G.alerts.bindGame(store.gameId);
+  G.alerts.attachBell(document.getElementById('fab-alerts'));
+  try { G.art = buildArt(R.scene, { name: view.baby.name }); } catch (e) { console.warn('[art]', e.message); }
   G.phone = new Phone(overlay, { run: (id, p, o) => runAction(G, id, p, o), setSpeed: (s) => setSpeed(G, s), audio, switchGame: () => restart(), signOut: () => { api.setToken(null); location.reload(); }, playdate: (kind, arg) => playdate(G, kind, arg), get tts() { return G.tts; }, set tts(v) { G.tts = v; } });
   G.chat = new Chat(overlay, { nearBaby: () => G.near.baby || (store.view && store.view.baby.state.held), onReply: (text) => { if (G.tts && audio.ctx) audio.speak(text, store.view.sim.days); }, onSpeak: () => { controls.lookAt(baby.headWorldPosition()); } });
   controls.onStep = () => audio.footstep();
@@ -124,6 +140,8 @@ function frame(G, dt) {
     if (G.action.look) G.controls.lookAt(G.baby.headWorldPosition());
     if (f >= 1) finishAction(G);
   }
+  if (G.art && G.art.update) G.art.update(v);
+  if (!G.choiceOpen && v.pendingChoices && v.pendingChoices.length && !document.querySelector('.modal')) showChoice(G, v.pendingChoices[0]);
   // context actions (rebuild only when the situation changes)
   const key = JSON.stringify([near, G.holding, v.baby.state.held, v.baby.state.activity, v.baby.state.crying, v.baby.needs.diaper < 60, v.baby.state.needsBurp, v.house.doorPackages.length, v.house.nurseHere, v.parent.away, !!G.action, v.inventory.bottlesClean, v.baby.state.pacifier, v.baby.wear.swaddled]);
   if (key !== G.lastActionsKey) {
@@ -207,6 +225,7 @@ async function runAction(G, id, params = {}, opts = {}) {
     const r = await send(G, id, params);
     if (opts.consumes && r && r.ok) { G.holding = null; G.holdingFood = null; G.arms.set(store.view.baby.state.held ? 'hold' : 'none'); }
     if (r && r.report) showReport(G, r.report);
+    if (r && r.detail) showObservation(r.detail);
   });
 }
 
@@ -250,7 +269,16 @@ async function uiAction(G, what) {
     const toys = v.baby.ageToys.map((t) => ({ label: t.replace(/_/g, ' '), id: t }));
     const pick = await chooserModal(overlay, 'Play with…', toys.length ? toys : [{ label: 'No age-appropriate toys — buy some', id: null }]);
     if (pick && pick.id) runAction(G, 'play', { toy: pick.id }, { anim: 'item', item: pick.id.includes('book') ? 'book' : 'toy', dur: 8, look: true });
-  } else if (what === 'lesson') G.phone.open('school');
+  } else if (what === 'play2') return choosePlayActivity(G, (id, p, o) => runAction(G, id, p, o));
+  else if (what === 'learn') return chooseLearn(G, (id, p, o) => runAction(G, id, p, o));
+  else if (what === 'allergen') return chooseAllergen(G, (id, p, o) => runAction(G, id, p, o));
+  else if (what === 'discipline') return chooseDiscipline(G, (id, p, o) => runAction(G, id, p, o));
+  else if (what === 'chores') return chooseChores(G, (id, p, o) => runAction(G, id, p, o));
+  else if (what === 'care') return chooseCare(G, (id, p, o) => runAction(G, id, p, o));
+  else if (what === 'word') return chooseWord(G, (id, p, o) => runAction(G, id, p, o));
+  else if (what === 'contacts') G.phone.open('contacts');
+  else if (what === 'choice') { const c = (v.pendingChoices || [])[0]; if (c) showChoice(G, c); }
+  else if (what === 'lesson') G.phone.open('school');
   else if (what === 'wardrobe') G.phone.open('wardrobe');
   else if (what === 'medicine') G.phone.open('health');
   else if (what === 'thermostat') G.phone.open('home');
@@ -276,6 +304,7 @@ function onEvent(G, e) {
 }
 
 function onView(G, v, prev) {
+  if (G.alerts) G.alerts.update(v, store.lastEvents || []);
   if (!prev) return;
   if (v.status === 'dead' && prev.status !== 'dead') { G.audio.setCrying(false); deathModal(overlay, v, () => restart()); }
   if (v.status === 'won' && prev.status !== 'won') winModal(overlay, v, () => restart());
@@ -308,6 +337,31 @@ function spawnGuest(G, snap) {
   G.guestView.baby.state.location = 'floor_guest';
 }
 function removeGuest(G) { if (G.guest) { G.R.scene.remove(G.guest.root); G.guest = null; } }
+
+// An interactive story choice: a real decision with a deadline, resolved on the server.
+function showChoice(G, choice) {
+  if (G.choiceOpen) return;
+  G.choiceOpen = true;
+  const el = document.createElement('div'); el.className = 'modal choice';
+  const secsLeft = () => Math.max(0, Math.round((choice.deadline - store.view.sim.time) / 60));
+  el.innerHTML = `<div class="card"><h2>${escapeText(choice.title)}</h2>
+    ${choice.lead ? `<p style="color:var(--muted)">${escapeText(choice.lead)}</p>` : ''}
+    <p style="color:var(--text)">${escapeText(choice.text)}</p>
+    <div class="games-list">${choice.options.map((o, i) => `<button data-i="${i}">${escapeText(o.label)}${o.hint ? `<span class="tag">${escapeText(o.hint)}</span>` : ''}</button>`).join('')}</div>
+    <p style="text-align:center;color:var(--muted);font-size:12px" id="ch-timer">${secsLeft()} baby-minutes to decide</p></div>`;
+  overlay.appendChild(el);
+  const timer = setInterval(() => { const t = el.querySelector('#ch-timer'); if (!t) return; const s = secsLeft(); t.textContent = s > 0 ? `${s} baby-minutes to decide` : 'Too slow — the moment is passing…'; if (s <= 0) close(); }, 700);
+  const close = () => { clearInterval(timer); el.remove(); G.choiceOpen = false; };
+  el.querySelectorAll('[data-i]').forEach((b) => {
+    b.onclick = async () => {
+      const opt = choice.options[Number(b.dataset.i)];
+      close();
+      const r = await G.socket.action('choice', { choiceId: choice.id, option: opt.id });
+      if (r && r.message) store.toast(r.message, (r.outcome && r.outcome.sev === 'danger') ? 'danger' : (r.outcome && r.outcome.sev) || 'info', 7000);
+    };
+  });
+}
+function escapeText(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 function tutorial(G) {
   const steps = [

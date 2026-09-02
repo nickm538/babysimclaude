@@ -19,6 +19,7 @@ export async function createFileStore(dir) {
     async getGame(id) { return data.games[id] ? JSON.parse(JSON.stringify(data.games[id])) : null; },
     async listGames(userId) { return Object.values(data.games).filter((g) => g.userId === userId).sort((a, b) => b.createdAt - a.createdAt).map((g) => ({ id: g.id, status: g.status, babyName: g.baby.name, simTime: g.sim.time, lastTickAt: g.lastTickAt, createdAt: new Date(g.createdAt).toISOString() })); },
     async listActiveGames() { return Object.values(data.games).filter((g) => g.status === 'active').map((g) => g.id); },
+    async deleteGame(id) { delete data.games[id]; delete data.events[id]; delete data.chat[id]; mark(); },
     async appendEvents(gameId, events) { if (!events.length) return; const arr = (data.events[gameId] ||= []); arr.push(...events); if (arr.length > 2000) arr.splice(0, arr.length - 2000); mark(); },
     async listEvents(gameId, limit = 200) { return (data.events[gameId] || []).slice(-limit); },
     async appendChat(gameId, m) { const arr = (data.chat[gameId] ||= []); arr.push(m); if (arr.length > 500) arr.splice(0, arr.length - 500); mark(); },

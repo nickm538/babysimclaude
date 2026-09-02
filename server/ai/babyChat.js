@@ -5,6 +5,7 @@ import { ageDays, clockSeconds } from '../sim/engine.js';
 import { moodOf } from '../sim/view.js';
 import { distressOf } from '../sim/engine.js';
 import { stageFor, ageLabel } from '../../shared/constants.js';
+import { storySummaryForLLM } from '../sim/storyChapters.js';
 
 const MODEL = process.env.BABY_LLM_MODEL || 'claude-opus-5';
 let client = null;
@@ -50,7 +51,7 @@ function context(game) {
   const hour = Math.floor(clockSeconds(game) / 3600);
   return {
     days, mood, d, hour,
-    summary: `Name: ${b.name} (${b.sex}). Age: ${ageLabel(days)} (${stageFor(days).label}). Time: ${hour}:00. Mood: ${mood}. Activity: ${b.state.activity}, ${b.state.held ? 'being held by the parent' : `on the ${b.state.location.replace('_', ' ')}`}. Needs (0-100): fed ${Math.round(b.needs.fullness)}, rested ${Math.round(b.needs.rest)}, dry ${Math.round(b.needs.diaper)}, comfort ${Math.round(b.needs.comfort)}, engaged ${Math.round(b.needs.stimulation)}, loved ${Math.round(b.needs.affection)}, health ${Math.round(b.needs.health)}. Trust in parent ${Math.round(b.emo.trust)}/100, stress ${Math.round(b.emo.stress)}/100, happiness ${Math.round(b.emo.happiness)}/100, attachment: ${b.attachment}. ${b.state.cryingSince ? `Currently crying because: ${b.state.cryCause}.` : ''} ${b.illness ? `Sick: ${b.illness.id} (severity ${Math.round(b.illness.severity)}).` : ''} ${b.state.teething ? 'Teething.' : ''} Words known: ~${Math.round(Math.max(0, (b.dev.language - 15) * 12))}. Language score ${b.dev.language.toFixed(0)}/100, social ${b.dev.social.toFixed(0)}/100. Parent temper history: ${game.parent.tempers.yells} yells, ${game.parent.tempers.screams} screams, ${game.parent.tempers.leaves} times left alone.`,
+    summary: `Name: ${b.name} (${b.sex}). Age: ${ageLabel(days)} (${stageFor(days).label}). Time: ${hour}:00. Mood: ${mood}. Activity: ${b.state.activity}, ${b.state.held ? 'being held by the parent' : `on the ${b.state.location.replace('_', ' ')}`}. Needs (0-100): fed ${Math.round(b.needs.fullness)}, rested ${Math.round(b.needs.rest)}, dry ${Math.round(b.needs.diaper)}, comfort ${Math.round(b.needs.comfort)}, engaged ${Math.round(b.needs.stimulation)}, loved ${Math.round(b.needs.affection)}, health ${Math.round(b.needs.health)}. Trust in parent ${Math.round(b.emo.trust)}/100, stress ${Math.round(b.emo.stress)}/100, happiness ${Math.round(b.emo.happiness)}/100, attachment: ${b.attachment}. ${b.state.cryingSince ? `Currently crying because: ${b.state.cryCause}.` : ''} ${b.illness ? `Sick: ${b.illness.id} (severity ${Math.round(b.illness.severity)}).` : ''} ${b.state.teething ? 'Teething.' : ''} Words known: ~${Math.round(Math.max(0, (b.dev.language - 15) * 12))}. Language score ${b.dev.language.toFixed(0)}/100, social ${b.dev.social.toFixed(0)}/100. Parent temper history: ${game.parent.tempers.yells} yells, ${game.parent.tempers.screams} screams, ${game.parent.tempers.leaves} times left alone. ${storySummaryForLLM(game)}`,
   };
 }
 

@@ -130,7 +130,64 @@ export class GameAudio {
   doorbell() { if (!this.ctx) return; for (const [f, d] of [[659, 0], [523, 0.45]]) { const o = this.ctx.createOscillator(); o.frequency.value = f; const g = this.ctx.createGain(); g.gain.setValueAtTime(0.0001, this.t + d); g.gain.exponentialRampToValueAtTime(0.25, this.t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, this.t + d + 1.2); o.connect(g); g.connect(this.bus); o.start(this.t + d); o.stop(this.t + d + 1.3); } }
   footstep() { if (!this.ctx) return; const n = this.noise(0.09, 'lowpass', 380 + Math.random() * 120); n.g.gain.setValueAtTime(0.09, this.t); n.g.gain.exponentialRampToValueAtTime(0.0001, this.t + 0.09); n.g.connect(this.bus); n.src.start(); n.src.stop(this.t + 0.1); }
   click() { if (!this.ctx) return; const o = this.ctx.createOscillator(); o.frequency.value = 1400; const g = this.ctx.createGain(); g.gain.setValueAtTime(0.05, this.t); g.gain.exponentialRampToValueAtTime(0.0001, this.t + 0.04); o.connect(g); g.connect(this.bus); o.start(); o.stop(this.t + 0.05); }
-  notify(sev = 'info') { if (!this.ctx) return; const fs = sev === 'danger' ? [440, 330] : sev === 'good' ? [660, 880] : [520]; fs.forEach((f, i) => { const o = this.ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; const g = this.ctx.createGain(); const t0 = this.t + i * 0.12; g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.12, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25); o.connect(g); g.connect(this.bus); o.start(t0); o.stop(t0 + 0.3); }); }
+  notify(sev = 'info') {
+    if (!this.ctx) return;
+    if (sev === 'illness') return this.illnessAlert();
+    if (sev === 'story') return this.storyChime();
+    if (sev === 'social') return this.callRing();
+    if (sev === 'milestone') return this.celebrate();
+    const fs = sev === 'danger' ? [440, 330] : sev === 'good' ? [660, 880] : [520]; fs.forEach((f, i) => { const o = this.ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; const g = this.ctx.createGain(); const t0 = this.t + i * 0.12; g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.12, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25); o.connect(g); g.connect(this.bus); o.start(t0); o.stop(t0 + 0.3); });
+  }
+  // ---- alert chimes -------------------------------------------------------
+  // One shared voice for every UI chime so the volume setting keeps working.
+  tone(freq, at, dur, gain = 0.12, type = 'sine') {
+    if (!this.ctx) return;
+    const o = this.ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, at);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), at + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g); g.connect(this.bus); o.start(at); o.stop(at + dur + 0.02);
+    return { o, g };
+  }
+  // Unmistakable: a hard, slightly dissonant two-tone klaxon, twice.
+  illnessAlert() {
+    if (!this.ctx) return; const t0 = this.t;
+    for (const d of [0, 0.62]) {
+      this.tone(740, t0 + d, 0.26, 0.16, 'square');
+      this.tone(556, t0 + d + 0.001, 0.26, 0.07, 'square');
+      this.tone(494, t0 + d + 0.24, 0.4, 0.15, 'square');
+      this.tone(370, t0 + d + 0.241, 0.4, 0.07, 'square');
+    }
+  }
+  // Soft page-turn arpeggio for a new chapter / story beat.
+  storyChime() {
+    if (!this.ctx) return; const t0 = this.t;
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this.tone(f, t0 + i * 0.11, 0.9 - i * 0.1, 0.075, 'triangle'));
+    const n = this.noise(0.03, 'highpass', 5000); n.g.gain.setValueAtTime(0.03, t0); n.g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5); n.g.connect(this.bus); n.src.start(t0); n.src.stop(t0 + 0.6);
+  }
+  // Warm double ring for an incoming social call / visit.
+  callRing() {
+    if (!this.ctx) return; const t0 = this.t;
+    for (const d of [0, 0.9]) for (let i = 0; i < 8; i++) {
+      const at = t0 + d + i * 0.045;
+      this.tone(880, at, 0.05, 0.08, 'sine'); this.tone(1174, at, 0.05, 0.05, 'sine');
+    }
+  }
+  // Milestone: rising major arpeggio with a sparkle tail.
+  celebrate() {
+    if (!this.ctx) return; const t0 = this.t;
+    [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => { this.tone(f, t0 + i * 0.085, 0.55, 0.11, 'triangle'); this.tone(f * 2, t0 + i * 0.085, 0.3, 0.03, 'sine'); });
+    for (let i = 0; i < 10; i++) { const at = t0 + 0.42 + Math.random() * 0.5; this.tone(1800 + Math.random() * 2400, at, 0.12, 0.03, 'sine'); }
+  }
+  // A soft sigh as the baby drops off to sleep.
+  zzz() {
+    if (!this.ctx) return; const t0 = this.t;
+    const o = this.ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(420, t0); o.frequency.exponentialRampToValueAtTime(220, t0 + 1.1);
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.07, t0 + 0.18); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.2);
+    const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+    o.connect(lp); lp.connect(g); g.connect(this.bus); o.start(t0); o.stop(t0 + 1.3);
+    const n = this.noise(0.02, 'bandpass', 700, 1.2); n.g.gain.setValueAtTime(0.0001, t0); n.g.gain.linearRampToValueAtTime(0.022, t0 + 0.3); n.g.gain.linearRampToValueAtTime(0.0001, t0 + 1.2); n.g.connect(this.bus); n.src.start(t0); n.src.stop(t0 + 1.3);
+  }
   rattle() { if (!this.ctx) return; for (let i = 0; i < 6; i++) { const t0 = this.t + i * 0.09; const n = this.noise(0.1, 'bandpass', 3000 + Math.random() * 2000, 3); n.g.gain.setValueAtTime(0.1, t0); n.g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.06); n.g.connect(this.bus); n.src.start(t0); n.src.stop(t0 + 0.08); } }
   splash() { if (!this.ctx) return; const n = this.noise(0.12, 'bandpass', 1400, 1); n.g.gain.setValueAtTime(0.12, this.t); n.g.gain.exponentialRampToValueAtTime(0.0001, this.t + 0.5); n.g.connect(this.bus); n.src.start(); n.src.stop(this.t + 0.6); }
   setMobile(on) {

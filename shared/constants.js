@@ -248,6 +248,11 @@ export const TOYS = [
   { id: 'play_kitchen', label: 'Play kitchen', minDays: 700, maxDays: 1826, gains: { social: 1.0, cognitive: 0.7 } },
   { id: 'trike', label: 'Tricycle', minDays: 1000, maxDays: 1826, gains: { motor: 1.4 } },
   { id: 'dolls', label: 'Dolls & figures', minDays: 600, maxDays: 1826, gains: { social: 1.1, emotional: 0.8 } },
+  { id: 'mirror', label: 'Baby mirror', minDays: 60, maxDays: 900, gains: { social: 0.9, cognitive: 0.5 } },
+  { id: 'bath_toys', label: 'Bath toys', minDays: 90, maxDays: 1200, gains: { cognitive: 0.6, motor: 0.5 } },
+  { id: 'instruments', label: 'Shakers, bells & drum', minDays: 180, maxDays: 1826, gains: { motor: 0.7, language: 0.6, emotional: 0.5 } },
+  { id: 'blocks', label: 'Wooden blocks', minDays: 300, maxDays: 1826, gains: { cognitive: 1.0, motor: 0.9 } },
+  { id: 'sensory_bin', label: 'Sensory bin (rice & scoops)', minDays: 400, maxDays: 1826, gains: { cognitive: 0.9, motor: 0.9, emotional: 0.4 } },
 ];
 
 export const BABYPROOFING = [
@@ -291,6 +296,10 @@ export const SHOP = [
   { id: 'potty', label: 'Potty seat', cat: 'home', qty: 1, key: 'potty', deliveryH: 4 },
   { id: 'toddler_bed', label: 'Toddler bed', cat: 'home', qty: 1, key: 'toddler_bed', deliveryH: 8 },
   { id: 'babyproof', label: 'Baby-proofing kit', cat: 'home', qty: 1, key: 'babyproof', deliveryH: 4, sized: 'proofing' },
+  { id: 'carrier', label: 'Baby carrier / sling', cat: 'care', qty: 1, key: 'carrier', deliveryH: 4 },
+  { id: 'grooming_kit', label: 'Grooming kit (nail clippers, safety scissors)', cat: 'care', qty: 1, key: 'grooming_kit', deliveryH: 3 },
+  { id: 'stroller', label: 'Stroller', cat: 'home', qty: 1, key: 'stroller', deliveryH: 6 },
+  { id: 'sunscreen', label: 'Baby sunscreen SPF 30 (20 uses)', cat: 'health', qty: 20, key: 'sunscreen', deliveryH: 1.5, minDays: 150, warn: 'Under 6 months use shade and clothing, not sunscreen.' },
 ];
 
 export const ACTIONS = {
@@ -328,6 +337,50 @@ export const ACTIONS = {
   cuddle: { label: 'Cuddle', dur: 5 },
   talk: { label: 'Talk', dur: 0 },
   wash_bottles: { label: 'Wash bottles', dur: 5 },
+  // --- nuanced interactions (server/sim/actions2.js + actions3.js) ---
+  peekaboo: { label: 'Peekaboo', dur: 5 },
+  tickle: { label: 'Tickle', dur: 4 },
+  massage: { label: 'Baby massage', dur: 8 },
+  skin_to_skin: { label: 'Skin-to-skin', dur: 10 },
+  mirror_play: { label: 'Mirror play', dur: 6 },
+  dance: { label: 'Dance together', dur: 7 },
+  music_time: { label: 'Music time', dur: 7 },
+  sensory_play: { label: 'Sensory play', dur: 10 },
+  blocks_together: { label: 'Build with blocks', dur: 9 },
+  bath_toys: { label: 'Bath toys', dur: 6 },
+  bedtime_routine: { label: 'Bedtime routine', dur: 8 },
+  night_check: { label: 'Night check', dur: 3 },
+  dream_feed: { label: 'Dream feed', dur: 8 },
+  comfort_nightmare: { label: 'Comfort a nightmare', dur: 6 },
+  nail_trim: { label: 'Trim nails', dur: 6 },
+  haircut: { label: 'Haircut', dur: 8 },
+  stroller_walk: { label: 'Stroller walk', dur: 12 },
+  carrier: { label: 'Baby carrier', dur: 5 },
+  screen_time: { label: 'Screen time', dur: 3 },
+  video_call: { label: 'Video call with family', dur: 8 },
+  observe: { label: 'Look closely', dur: 4 },
+  sunscreen: { label: 'Sunscreen', dur: 4 },
+  water_plants: { label: 'Water the plants', dur: 6 },
+  sweep: { label: 'Sweep together', dur: 6 },
+  tidy_toys: { label: 'Tidy the toys', dur: 6 },
+  cook_together: { label: 'Cook together', dur: 12 },
+  teach_word: { label: 'Teach a word', dur: 5 },
+  body_parts: { label: 'Name body parts', dur: 5 },
+  sing_abcs: { label: 'Sing the ABCs', dur: 5 },
+  count_together: { label: 'Count together', dur: 5 },
+  read_dialogic: { label: 'Read with questions', dur: 9 },
+  introduce_allergen: { label: 'Introduce an allergen', dur: 8 },
+  allergy_call: { label: 'Call about a reaction', dur: 0 },
+  offer_water: { label: 'Offer water', dur: 4 },
+  self_feed: { label: 'Let them self-feed', dur: 10 },
+  clean_drops: { label: 'Clean the floor', dur: 4 },
+  table_manners: { label: 'Table manners', dur: 6 },
+  praise: { label: 'Praise', dur: 3 },
+  gentle_correction: { label: 'Gentle correction', dur: 4 },
+  name_feeling: { label: 'Name the feeling', dur: 4 },
+  time_in: { label: 'Time-in', dur: 6 },
+  time_out: { label: 'Time-out', dur: 5 },
+  harsh: { label: 'Harsh punishment', dur: 3 },
 };
 
 export const LOCATIONS = ['crib', 'changing_table', 'play_mat', 'floor', 'sofa', 'high_chair', 'held', 'playpen', 'bath', 'kitchen', 'stairs', 'toddler_bed'];
@@ -348,3 +401,114 @@ export function ageLabel(days) {
   const m = Math.floor((days - y * 365.25) / 30.44);
   return `${y} year${y === 1 ? '' : 's'}${m ? `, ${m} mo` : ''} old`;
 }
+
+// ---------------------------------------------------------------------------
+// Data for the nuanced interactions (server/sim/actions2.js, actions3.js and
+// client/src/ui/interactions.js). Appended at the end so both runtimes share it.
+// ---------------------------------------------------------------------------
+
+// Words a parent can deliberately teach, unlocked by age. Repetition turns them
+// into "known" words in baby.vocabulary; a baby never says one before ~10 months.
+export const WORDS_BY_AGE = [
+  { minDays: 150, label: 'First sounds', words: ['mama', 'dada', 'baba', 'hi', 'bye', 'up', 'milk', 'ball', 'dog', 'cat', 'more', 'no'] },
+  { minDays: 365, label: 'First words', words: ['water', 'shoe', 'book', 'car', 'bird', 'bath', 'juice', 'banana', 'please', 'hot', 'all done', 'again'] },
+  { minDays: 548, label: 'Everyday words', words: ['thank you', 'sorry', 'help', 'outside', 'friend', 'yellow', 'blue', 'big', 'little', 'mine', 'share', 'gentle'] },
+  { minDays: 913, label: 'Ideas & feelings', words: ['because', 'tomorrow', 'careful', 'proud', 'together', 'remember', 'promise', 'maybe', 'later', 'favourite'] },
+];
+
+export const BODY_PARTS = ['nose', 'mouth', 'ears', 'eyes', 'hair', 'hands', 'feet', 'tummy', 'toes', 'knees', 'fingers', 'cheeks'];
+
+// Early, gradual introduction (from ~6 months) lowers real allergy risk; `risk` is
+// the per-first-exposure chance of a reaction before age scaling.
+export const ALLERGENS = [
+  { id: 'peanut', label: 'Peanut butter thinned with water', risk: 0.16 },
+  { id: 'egg', label: 'Well-cooked scrambled egg', risk: 0.13 },
+  { id: 'dairy', label: 'Full-fat plain yoghurt', risk: 0.10 },
+  { id: 'wheat', label: 'Wheat toast strips', risk: 0.06 },
+  { id: 'fish', label: 'Flaked cooked white fish', risk: 0.08 },
+];
+
+export const FEELINGS = ['happy', 'sad', 'angry', 'frustrated', 'scared', 'tired', 'excited', 'jealous', 'proud', 'disappointed', 'lonely', 'shy'];
+
+export const DISCIPLINE = [
+  { id: 'praise', label: '🌟 Praise what went well', minDays: 365, sub: 'name the behaviour, not the child' },
+  { id: 'name_feeling', label: '💬 Name the feeling', minDays: 365, sub: 'emotion coaching', param: 'feeling' },
+  { id: 'gentle_correction', label: '✋ Gentle correction', minDays: 365, sub: 'show what to do instead' },
+  { id: 'time_in', label: '🫂 Time-in (sit together)', minDays: 365, sub: 'co-regulation, stress down' },
+  { id: 'time_out', label: '⏳ Time-out (1 minute per year)', minDays: 730, sub: 'brief, small trust cost', param: 'minutes' },
+  { id: 'harsh', label: '😠 Shout them down', minDays: 0, sub: 'exactly as damaging as yelling', cls: 'danger', param: 'kind' },
+];
+
+export const INSTRUMENTS = [
+  { id: 'shaker', label: '🥤 Shaker' }, { id: 'drum', label: '🥁 Drum' },
+  { id: 'bells', label: '🔔 Bells' }, { id: 'xylophone', label: '🎹 Xylophone' },
+];
+
+// Sensory play needs supervision; rice and dough are choking hazards before the
+// child stops mouthing everything.
+export const SENSORY = [
+  { id: 'water', label: '💧 Water play (shallow tray)', minDays: 240, bin: false },
+  { id: 'rice', label: '🍚 Rice bin & scoops', minDays: 400, bin: true },
+  { id: 'dough', label: '🎨 Play dough', minDays: 540, bin: true },
+];
+
+export const CHORES = [
+  { id: 'water_plants', label: '💧 Water the plants', minDays: 730 },
+  { id: 'sweep', label: '🧹 Sweep together', minDays: 730 },
+  { id: 'tidy_toys', label: '🧺 Put the toys away', minDays: 730 },
+  { id: 'cook_together', label: '🥣 Cook together', minDays: 1095 },
+];
+
+// Bath → book → song → into bed, all within ROUTINE_WINDOW_MIN sim minutes.
+export const ROUTINE_STEPS = [
+  { id: 'bath', label: '🛁 Warm bath', order: 0 },
+  { id: 'book', label: '📖 Bedtime book', order: 1 },
+  { id: 'song', label: '🎵 Lullaby', order: 2 },
+  { id: 'down', label: '😴 Into bed, drowsy but awake', order: 3 },
+];
+export const ROUTINE_WINDOW_MIN = 40;
+
+export const CALL_FAMILY = ['grandma', 'grandpa', 'auntie', 'uncle', 'cousin', 'godparent'];
+
+// Rough outdoor temperature (°C) by season, used by the stroller walk.
+export const SEASON_TEMP = { winter: 2, spring: 14, summer: 28, autumn: 11 };
+
+// --- mood spectrum, temperament and emergent traits (server/sim/mood.js, storyChapters.js) ---
+// MOOD_LABELS is ordered ascending by `min`; a value maps to the last entry whose min it meets.
+export const MOOD_LABELS = [
+  { min: -100, label: 'Agony', blurb: 'suffering, and running out of time' },
+  { min: -78, label: 'Misery', blurb: 'beyond comforting' },
+  { min: -58, label: 'Distress', blurb: 'frightened and overwhelmed' },
+  { min: -38, label: 'Unhappy', blurb: 'miserable and hard to settle' },
+  { min: -18, label: 'Low', blurb: 'flat and out of sorts' },
+  { min: -6, label: 'Neutral', blurb: 'neither happy nor upset' },
+  { min: 12, label: 'Content', blurb: 'settled and easy' },
+  { min: 34, label: 'Happy', blurb: 'bright and engaged' },
+  { min: 58, label: 'Joyful', blurb: 'delighted with the world' },
+  { min: 80, label: 'Elated', blurb: 'lit up from the inside' },
+];
+
+export const TEMPERAMENTS = {
+  easy: { label: 'Easy-going', blurb: 'settles readily, recovers fast, and forgives a missed cue.' },
+  'slow-to-warm': { label: 'Slow to warm', blurb: 'wary of anything new, but deeply attached once trust is earned.' },
+  spirited: { label: 'Spirited', blurb: 'feels everything at full volume — the joy as much as the fury.' },
+};
+export const TEMPERAMENT_IDS = Object.keys(TEMPERAMENTS);
+
+export const TRAITS = {
+  giggler: { label: 'Giggler', article: 'a', blurb: 'laughs at almost anything, and it is impossible not to join in.' },
+  night_owl: { label: 'Night owl', article: 'a', blurb: 'comes alive after dark and fights every bedtime.' },
+  early_riser: { label: 'Early riser', article: 'an', blurb: 'is awake and cheerful long before you are.' },
+  sensitive_sleeper: { label: 'Sensitive sleeper', article: 'a', blurb: 'wakes at a floorboard; the house tiptoes.' },
+  cuddly: { label: 'Cuddler', article: 'a', blurb: 'wants to be held, and melts the moment you pick {them} up.' },
+  picky_eater: { label: 'Picky eater', article: 'a', blurb: 'has opinions about food, and they change daily.' },
+  foodie: { label: 'Enthusiastic eater', article: 'an', blurb: 'meets every new food like a personal gift.' },
+  explorer: { label: 'Explorer', article: 'an', blurb: 'has to touch, open and taste everything within reach.' },
+  daredevil: { label: 'Daredevil', article: 'a', blurb: 'climbs first and considers the landing afterwards.' },
+  wary: { label: 'Wary one', article: 'a', blurb: 'watches from behind your leg until the room has proved itself.' },
+  chatterbox: { label: 'Chatterbox', article: 'a', blurb: 'narrates the entire world, whether or not anyone is listening.' },
+  bookworm: { label: 'Bookworm', article: 'a', blurb: 'brings you the same book again, and again, and again.' },
+  gentle_soul: { label: 'Gentle soul', article: 'a', blurb: 'pats faces, shares snacks, and notices when someone is sad.' },
+  stubborn: { label: 'Stubborn streak', article: 'a', blurb: 'will out-wait you on principle, every single time.' },
+};
+export const WEATHERS = ['clear', 'cloudy', 'rain', 'storm', 'snow', 'heatwave', 'cold_snap'];

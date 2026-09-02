@@ -74,9 +74,12 @@ export function updateIllness(game, dtH, rng, days) {
   const recentMeds = ill.medsAt.some((m) => game.sim.time - m < 6 * HOUR);
   const supported = b.needs.fullness > 40 && b.needs.rest > 30;
   let rate;
-  if (elapsedD < def.courseDays * 0.4) rate = ill.treated ? 1.0 : 2.4;
-  else if (elapsedD < def.courseDays) rate = ill.treated ? -3.2 : (def.danger < 1 ? -1.4 : 0.4);
-  else rate = ill.treated ? -4 : -1.6 * (def.danger < 1 ? 1.5 : 0.5);
+  if (elapsedD < def.courseDays * 0.4) rate = ill.treated ? 0.55 : 2.4;
+  else if (elapsedD < def.courseDays) rate = ill.treated ? -3.6 : (def.danger < 1 ? -1.4 : 0.4);
+  else rate = ill.treated ? -4.5 : -1.6 * (def.danger < 1 ? 1.5 : 0.5);
+  // Treating early keeps the illness from ever reaching its worst: the peak it climbs toward is capped
+  // once a doctor is involved, so calling for help is always the right move.
+  if (ill.treated) ill.peak = Math.min(ill.peak, 62);
   if (ill.id === 'failure_to_thrive') rate = b.emo.happiness > 35 && b.phys.nutrition > 0.95 ? -2 : 1.2;
   if (ill.id === 'jaundice') rate = b.needs.fullness > 45 ? -2.5 : 0.8;
   if (recentMeds) rate -= 0.8;

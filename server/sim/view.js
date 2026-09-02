@@ -3,14 +3,20 @@ import { ageDays, clockSeconds, isNight, distressOf, expectedDev, ageToys } from
 import { neededSizes } from './state.js';
 import { stageFor, MILESTONES, CHECKUPS, VACCINES, LESSONS, TOYS, ILLNESSES, TIME, DAY, HOUR } from '../../shared/constants.js';
 import { growthPercentile } from './health.js';
+import { computeMood } from './mood.js';
+import { ensureStory } from './story.js';
+import { storyView } from './storyChapters.js';
+import { ensureSocial, socialView } from './social.js';
 import { isMobile } from './events.js';
 
 export function gameView(game) {
+  ensureStory(game); ensureSocial(game);
   const b = game.baby, days = ageDays(game), t = game.sim.time;
+  const mood = computeMood(game);
   const sizes = neededSizes(b);
   const d = distressOf(game, days);
   const exp = expectedDev(days);
-  const mood = moodOf(game, d);
+  const moodWord = moodOf(game, d);
   return {
     id: game.id, status: game.status, createdAt: game.createdAt, settings: game.settings,
     sim: { time: t, days, clock: clockSeconds(game), night: isNight(game), stage: stageFor(days).id, season: game.house.season },
@@ -27,7 +33,7 @@ export function gameView(game) {
         sinceFedMin: (t - b.state.lastFedAt) / 60, sinceDiaperMin: (t - b.state.lastDiaperAt) / 60, sinceBathH: (t - b.state.lastBathAt) / 3600,
         colic: b.state.colicUntil > t, postVaccine: b.state.postVaccineUntil > t, mobile: isMobile(game),
       },
-      mood, distress: { value: Math.round(d.value), cause: d.cause },
+      mood: moodWord, moodValue: mood.value, moodLabel: mood.label, moodText: mood.text, distress: { value: Math.round(d.value), cause: d.cause },
       illness: b.illness ? { id: b.illness.id, label: b.illness.known ? ILLNESSES[b.illness.id].label : 'Unwell (undiagnosed)', severity: Math.round(b.illness.severity), known: b.illness.known, treated: b.illness.treated, days: +((t - b.illness.startedAt) / DAY).toFixed(1) } : null,
       injuries: b.injuries.filter((i) => i.healAt > t).map((i) => ({ kind: i.kind, severe: i.severe, healsInH: Math.round((i.healAt - t) / HOUR) })),
       milestones: b.milestones, delays: b.delays, attachment: b.attachment, responsiveness: +b.responsiveness.toFixed(2),
@@ -35,10 +41,17 @@ export function gameView(game) {
       counters: b.counters, history: round(b.history), doctorNotes: b.doctorNotes.slice(-5), doctorApprovedMeds: b.doctorApprovedMeds,
       schedule: scheduleFor(game, days),
       ageToys: ageToys(game),
+      vocabulary: b.vocabulary || [],
+      allergens: b.allergens || {},
     },
     parent: { ...game.parent, away: game.parent.awayUntil > t, awayMinutesLeft: Math.max(0, (game.parent.awayUntil - t) / 60), sitter: game.parent.babysitterUntil > t, sitterHoursLeft: Math.max(0, (game.parent.babysitterUntil - t) / 3600) },
     house: { ...game.house, nurseHere: !!(game.house.nurseAtDoor && game.house.nurseAtDoor.arrivesAt <= t), nurseEtaMin: game.house.nurseAtDoor ? Math.max(0, (game.house.nurseAtDoor.arrivesAt - t) / 60) : null },
     inventory: game.inventory,
+    social: socialView(game),
+    story: storyView(game),
+    notifications: (game.notifications || []).slice(0, 30),
+    pendingChoices: (game.pendingChoices || []).map((c) => ({ id: c.id, t: c.t, deadline: c.deadline, title: c.title, text: c.text, lead: c.lead, options: c.options })),
+    weather: (game.story && game.story.weather) || 'clear',
     orders: game.orders.filter((o) => o.status !== 'collected').map((o) => ({ ...o, etaMin: Math.max(0, (o.arrivesAt - t) / 60) })),
     journal: game.journal.slice(-80),
     stats: game.stats,

@@ -23,6 +23,7 @@ export const api = {
   chat: (id, text) => api.post(`/api/games/${id}/chat`, { text }),
   chatHistory: (id) => api.get(`/api/games/${id}/chat`),
   events: (id) => api.get(`/api/games/${id}/events?limit=300`),
+  socialAction: (gameId, action, body) => api.post(`/api/social/${gameId}/${action}`, body || {}),
   playdateCreate: (gameId) => api.post('/api/playdates', { gameId }),
   playdateJoin: (code, gameId) => api.post(`/api/playdates/${code}/join`, { gameId }),
   playdateGet: (code) => api.get(`/api/playdates/${code}`),

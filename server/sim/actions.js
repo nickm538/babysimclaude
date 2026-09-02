@@ -4,6 +4,8 @@ import { log, ageDays, distressOf } from './engine.js';
 import { mk, doctorVisit } from './health.js';
 import { diaperCount, takeDiaper } from './events.js';
 import { makeRng } from './rng.js';
+import { EXTRA_HANDLERS } from './actions2.js';
+import { resolveChoice } from './story.js';
 
 const TOY_INDEX = Object.fromEntries(TOYS.map((t) => [t.id, t]));
 const LESSON_INDEX = Object.fromEntries(LESSONS.map((l) => [l.id, l]));
@@ -508,6 +510,11 @@ const HANDLERS = {
     return ok('All bottles washed and sterilized.');
   },
 
+  choice(game, { choiceId, option }, rng) {
+    if (typeof choiceId !== 'string' || typeof option !== 'string') return fail('Pick an option.');
+    return resolveChoice(game, choiceId, option, rng);
+  },
+
   talk(game, { tone = 'gentle' }) {
     const b = game.baby, n = b.needs;
     touch(game); b.state.lastTalkAt = game.sim.time;
@@ -519,6 +526,8 @@ const HANDLERS = {
     return ok('Talked.');
   },
 };
+
+Object.assign(HANDLERS, EXTRA_HANDLERS);
 
 function sidsCheck(game, rng, mult = 1) {
   const b = game.baby;

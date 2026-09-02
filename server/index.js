@@ -7,6 +7,7 @@ import { GameManager } from './game_manager.js';
 import { authRoutes } from './routes/auth.js';
 import { gameRoutes } from './routes/games.js';
 import { playdateRoutes } from './routes/playdates.js';
+import { socialRoutes } from './routes/social.js';
 import { createHub } from './ws.js';
 import { llmAvailable } from './ai/babyChat.js';
 
@@ -28,6 +29,7 @@ async function main() {
   const server = http.createServer(app);
   const hub = createHub(server, store, gm);
   app.use('/api/playdates', playdateRoutes(store, gm, hub));
+  app.use('/api/social', socialRoutes(store, gm));
 
   // static: client, shared code and the three.js build (served straight from node_modules — no bundler)
   const staticOpts = { maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0, etag: true };
