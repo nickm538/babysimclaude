@@ -1,0 +1,46 @@
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS games (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'active',
+  baby_name TEXT NOT NULL,
+  sim_time DOUBLE PRECISION NOT NULL DEFAULT 0,
+  last_tick_at BIGINT NOT NULL,
+  state JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS games_user_idx ON games(user_id, status);
+CREATE TABLE IF NOT EXISTS events (
+  id BIGSERIAL PRIMARY KEY,
+  game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  sim_time DOUBLE PRECISION NOT NULL,
+  type TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'info',
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS events_game_idx ON events(game_id, id DESC);
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id BIGSERIAL PRIMARY KEY,
+  game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tone TEXT,
+  sim_time DOUBLE PRECISION NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS chat_game_idx ON chat_messages(game_id, id DESC);
+CREATE TABLE IF NOT EXISTS playdates (
+  code TEXT PRIMARY KEY,
+  host_game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  guest_game_id TEXT REFERENCES games(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ended_at TIMESTAMPTZ
+);
