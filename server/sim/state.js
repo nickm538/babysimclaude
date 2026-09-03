@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { medianGrowth, clothingSizeFor, diaperSizeFor, TIME } from '../../shared/constants.js';
+import { medianGrowth, clothingSizeFor, diaperSizeFor, clamp, TIME } from '../../shared/constants.js';
 import { hashSeed } from './rng.js';
 
 const SKIN_TONES = ['#f6d3c1', '#eec3a8', '#d9a982', '#b97a52', '#8c5a3c', '#5b3a29'];
@@ -20,6 +20,28 @@ export function defaultAppearance(seedStr) {
 // `id` is normally left out and generated; pass one to reproduce a specific baby exactly (tests, and
 // re-running a game a player reported a problem with — everything random about a newborn, from the
 // seed to the appearance to the temperament and the circle of people, derives from it).
+// Fields added after games were already in the wild. Called on every load and every tick entry, so a
+// save from an older build keeps working instead of producing NaNs the first time something reads an
+// undefined stat.
+export function ensureGameShape(game) {
+  if (!game || !game.baby) return game;
+  const b = game.baby;
+  if (typeof b.emo.esteem !== 'number' || !Number.isFinite(b.emo.esteem)) {
+    // Reconstruct a plausible starting point rather than snapping to a default: a child who has been
+    // treated well so far did not have zero self-esteem up to now.
+    b.emo.esteem = clamp((b.emo.happiness * 0.5 + b.emo.security * 0.5), 0, 100);
+  }
+  if (!b.history) b.history = {};
+  if (typeof b.history.firstSmackAt !== 'number') b.history.firstSmackAt = 0;
+  if (game.parent) {
+    if (!game.parent.tempers) game.parent.tempers = { yells: 0, screams: 0, leaves: 0, smacks: 0 };
+    if (typeof game.parent.tempers.smacks !== 'number') game.parent.tempers.smacks = 0;
+    if (typeof game.parent.safeguarding !== 'number') game.parent.safeguarding = 0;
+  }
+  if (game.stats && typeof game.stats.smacks !== 'number') game.stats.smacks = 0;
+  return game;
+}
+
 export function createGame({ userId, babyName, sex = 'boy', parentName = 'You', appearance, settings, id: fixedId } = {}) {
   const id = fixedId || randomUUID();
   const now = Date.now();
@@ -42,7 +64,10 @@ export function createGame({ userId, babyName, sex = 'boy', parentName = 'You', 
       sex,
       appearance: { ...defaultAppearance(id), ...(appearance || {}) },
       needs: { fullness: 78, rest: 72, diaper: 100, clean: 92, comfort: 80, stimulation: 60, affection: 70, health: 96 },
-      emo: { happiness: 62, trust: 50, security: 50, stress: 18 },
+      // esteem: how a child feels about themselves. Praise, being answered and succeeding at things
+      // build it; being shouted at, called names or ignored erode it. It moves slowly, in both
+      // directions, which is the point.
+      emo: { happiness: 62, trust: 50, security: 50, esteem: 55, stress: 18 },
       dev: { cognitive: 0.6, motor: 0.6, language: 0.6, social: 0.6, emotional: 0.6 },
       phys: {
         weightKg: +w.toFixed(2), heightCm: +h.toFixed(1), tempC: 36.8, teeth: 0, teethStart,
@@ -67,7 +92,7 @@ export function createGame({ userId, babyName, sex = 'boy', parentName = 'You', 
       counters: { tummyTimeMin: 0, floorTimeMin: 0, pottyProgress: 0, playdates: 0, lessons: {}, reads: 0, plays: 0, feeds: 0, diapers: 0 },
       responsiveness: 0.6,
       attachment: 'forming',
-      history: { toxicStressH: 0, unansweredCryMin: 0, cryMin: 0, criesAnswered: 0, criesTotal: 0, hungerH: 0, wetH: 0 },
+      history: { toxicStressH: 0, unansweredCryMin: 0, cryMin: 0, criesAnswered: 0, criesTotal: 0, hungerH: 0, wetH: 0, firstSmackAt: 0 },
       doctorNotes: [],
       doctorApprovedMeds: false,
     },
@@ -78,7 +103,7 @@ export function createGame({ userId, babyName, sex = 'boy', parentName = 'You', 
       awayUntil: 0,
       awayReason: null,
       babysitterUntil: 0,
-      tempers: { yells: 0, screams: 0, leaves: 0 },
+      tempers: { yells: 0, screams: 0, leaves: 0, smacks: 0 },
     },
     house: {
       proofing: {},
@@ -98,7 +123,7 @@ export function createGame({ userId, babyName, sex = 'boy', parentName = 'You', 
     },
     orders: [],
     journal: [],
-    stats: { feeds: 0, diapers: 0, baths: 0, plays: 0, reads: 0, lessons: 0, doctorVisits: 0, yells: 0, screams: 0, leaves: 0, playdates: 0, cries: 0, hazards: 0 },
+    stats: { feeds: 0, diapers: 0, baths: 0, plays: 0, reads: 0, lessons: 0, doctorVisits: 0, yells: 0, screams: 0, leaves: 0, smacks: 0, playdates: 0, cries: 0, hazards: 0 },
     flags: { warnedTummySleep: false, warnedSwaddle: false, tutorial: true },
     chat: [],
     death: null,

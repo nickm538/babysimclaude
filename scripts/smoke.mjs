@@ -49,6 +49,13 @@ try {
   if (pw) {
     const browser = await pw.chromium.launch({ executablePath: process.env.SMOKE_CHROME || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    // Screenshots are diagnostics, not assertions. On a software rasteriser a single frame can take
+    // longer than Playwright's default timeout, and a stalled screenshot must never hold up (or
+    // silently fail) a run whose actual checks have all passed.
+    const shoot = async (file) => {
+      try { await page.screenshot({ path: path.join(process.cwd(), 'scripts', file), timeout: 15000 }); return true; }
+      catch (e) { console.log(`note screenshot ${file} skipped: ${String(e.message).split('\n')[0]}`); return false; }
+    };
     const errors = [];
     page.on('pageerror', (e) => errors.push((e && e.stack) ? String(e.stack) : String(e))); page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
     await page.goto(base + '/', { waitUntil: 'load' });
@@ -60,7 +67,7 @@ try {
     check(info.built, `baby mesh built (${info.verts} vertices)`);
     check(info.hud && info.hasBars, 'HUD rendered');
     // click through the phone tabs, the shop cart, the chat and the temper chooser
-    const clickStep = async (sel, label) => { try { const n = await page.$$eval(sel, (els) => { if (!els.length) throw new Error('not found'); if (els[0].disabled) throw new Error('disabled'); els[0].click(); return els.length; }); void n; return true; } catch (e) { await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-fail.png') }); check(false, `${label}: ${String(e.message).split('\n')[0]}`); return false; } };
+    const clickStep = async (sel, label) => { try { const n = await page.$$eval(sel, (els) => { if (!els.length) throw new Error('not found'); if (els[0].disabled) throw new Error('disabled'); els[0].click(); return els.length; }); void n; return true; } catch (e) { await shoot('smoke-fail.png'); check(false, `${label}: ${String(e.message).split('\n')[0]}`); return false; } };
     await clickStep('#fab-phone', 'open phone'); await wait(300);
     const tabs = ['baby', 'health', 'shop', 'wardrobe', 'school', 'home', 'contacts', 'friends', 'story', 'settings'];
     const tabLens = {};
@@ -70,14 +77,14 @@ try {
     await clickStep('[data-item="wipes"] [data-add]', 'add to cart'); await wait(100); await clickStep('[data-cart-order]', 'order'); await wait(600);
     const ordered = await page.evaluate(() => (window.__cradle && document.body.innerText.includes('Order placed')) || document.querySelectorAll('.toast').length > 0);
     check(ordered, 'shop order from the phone');
-    await clickStep('[data-tab="baby"]', 'baby tab'); await wait(200); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-phone.png') });
+    await clickStep('[data-tab="baby"]', 'baby tab'); await wait(200); await shoot('smoke-phone.png');
     await clickStep('#ph-close', 'close phone'); await wait(200);
     await clickStep('#fab-chat', 'open chat'); await wait(400);
     try { await page.$eval('#chat-input', (el) => { el.value = 'hello little one, mama is here'; }); } catch (e) { check(false, 'chat input: ' + e.message.split('\n')[0]); }
     await clickStep('#chat-form button[type=submit]', 'send chat'); await wait(1500);
     const chatOk = await page.evaluate(() => document.querySelectorAll('.msg.baby').length >= 1 && document.querySelectorAll('.msg.parent').length >= 1);
     check(chatOk, 'chat panel round-trip');
-    await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-chat.png') });
+    await shoot('smoke-chat.png');
     await clickStep('#chat-close', 'close chat'); await wait(200);
     // fire a particle burst so the effects shader actually compiles and runs a few frames
     const burst = await page.evaluate(() => {
@@ -90,34 +97,135 @@ try {
     await wait(500);
     check(typeof burst === 'number' && burst > 0, `particle burst emitted (${burst})`);
     const temperOpened = await page.evaluate(() => { const b = [...document.querySelectorAll('.actions button')].find((x) => x.textContent.includes('Lose your temper')); if (!b) return 'nobutton'; b.click(); return 'clicked'; }); await wait(400); const hasModal = await page.evaluate(() => !!document.querySelector('#ch-cancel')); check(temperOpened === 'clicked' && hasModal, 'temper chooser opens'); if (hasModal) await page.$eval('#ch-cancel', (el) => el.click());
+    // a visitor should actually appear in the room, not just in the Family tab
+    const vis = await j('POST', `/api/games/${id}/debug/visitor`, { activity: 'holding the baby' }, u.token);
+    check(vis.ok, `debug visitor -> ${vis.visitor ? vis.visitor.name : 'none'}`);
+    await wait(2500);
+    const npc = await page.evaluate(() => {
+      const G = window.__cradle;
+      if (!G || !G.visitors) return { built: false, reason: 'no visitor manager' };
+      const rec = [...G.visitors.people.values()][0];
+      if (!rec) return { built: false, reason: 'nobody in the room' };
+      let verts = 0, meshes = 0;
+      rec.npc.root.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) { meshes++; verts += o.geometry?.attributes?.position?.count || 0; } });
+      // Rendered size, not designed size: the geometry's own box, the skinned box (what the bones do
+      // to it), and the root's world scale. A person who is 1.5m in the layout must be 1.5m on screen.
+      const body = rec.npc.body;
+      body.geometry.computeBoundingBox();
+      const g = body.geometry.boundingBox;
+      let skinned = null;
+      try { body.computeBoundingBox(); skinned = body.boundingBox; } catch { /* older three */ }
+      rec.npc.root.updateMatrixWorld(true);
+      const e = rec.npc.root.matrixWorld.elements;
+      const worldScale = Math.hypot(e[0], e[1], e[2]);
+      return { built: true, meshes, verts, hair: !!rec.npc.hair, height: rec.npc.layout.totalH,
+        geoH: g.max.y - g.min.y, skinH: skinned ? skinned.max.y - skinned.min.y : null, worldScale, rootY: rec.npc.root.position.y };
+    });
+    check(npc.built && npc.verts > 3000, `visitor rendered (${npc.meshes} meshes, ${npc.verts} verts, ${npc.height ? npc.height.toFixed(2) : '?'}m)${npc.reason ? ' — ' + npc.reason : ''}`);
+    if (npc.built) {
+      const drawn = npc.skinH ?? npc.geoH;
+      check(Math.abs(drawn * npc.worldScale - npc.height) < 0.12,
+        `visitor is drawn at its designed height (layout ${npc.height.toFixed(2)}m, geometry ${npc.geoH.toFixed(2)}m, skinned ${npc.skinH == null ? 'n/a' : npc.skinH.toFixed(2) + 'm'}, world scale ${npc.worldScale.toFixed(2)})`);
+    }
+    // Stand back and look at the visitor so the screenshot shows a person, not a wall. The baby goes
+    // down first, otherwise a held head fills the frame.
+    if (npc.built) {
+      await j('POST', `/api/games/${id}/actions`, { id: 'put_down', params: { location: 'play_mat', position: 'back' } }, u.token);
+      await wait(600);
+      await page.evaluate(() => {
+        const G = window.__cradle;
+        const rec = [...G.visitors.people.values()][0];
+        const p = rec.npc.root.position;
+        // yaw 0 looks down -Z, so stand on the +Z side of them and look back
+        G.controls.pos.set(p.x, 1.62, p.z + 1.7);
+        G.controls.yaw = 0; G.controls.pitch = -0.06;
+      });
+      await wait(1500);
+      await shoot('smoke-visitor.png');
+    }
+
+    // Talking is gameplay: what you type must move real stats and cause real events.
+    const beforeChat = await j('GET', `/api/games/${id}`, null, u.token);
+    const esteem0 = beforeChat.game.baby.emo.esteem;
+    check(typeof esteem0 === 'number', `self-esteem is tracked (${esteem0 == null ? 'missing' : esteem0.toFixed(0)})`);
+    const cruel = await j('POST', `/api/games/${id}/chat`, { text: 'i hate you, you are horrible' }, u.token);
+    check(cruel.game.baby.emo.esteem < esteem0 && Array.isArray(cruel.words) && cruel.words.length > 0,
+      `cruelty lands (esteem ${esteem0.toFixed(0)} -> ${cruel.game.baby.emo.esteem.toFixed(0)}, ${(cruel.words || []).join('/')})`);
+    const low = cruel.game.baby.emo.esteem;
+    const kind = await j('POST', `/api/games/${id}/chat`, { text: 'i am sorry. i love you so much, you are wonderful' }, u.token);
+    check(kind.game.baby.emo.esteem > low, `praise and apology repair some of it (-> ${kind.game.baby.emo.esteem.toFixed(0)})`);
+    // A request a newborn cannot possibly carry out is refused by the simulation, with a reason.
+    const chore = await j('POST', `/api/games/${id}/chat`, { text: 'go wash the dishes' }, u.token);
+    check(chore.outcome && chore.outcome.kind === 'too_young', `a request is understood as a request (${chore.outcome ? chore.outcome.kind : 'none'})`);
+
+    // the player's own arms are the most-looked-at geometry in the game — make sure they build
+    await j('POST', `/api/games/${id}/actions`, { id: 'hold', params: {} }, u.token);
+    await wait(1200);
+    const arms = await page.evaluate(() => {
+      const a = window.__cradle && window.__cradle.arms;
+      if (!a || !a.right || !a.right.mesh) return { ok: false };
+      const g = a.right.mesh.geometry;
+      return { ok: true, verts: g.attributes.position.count, skinned: !!g.attributes.skinWeight, bones: Object.keys(a.right.bones).length, visible: a.rig.visible };
+    });
+    check(arms.ok && arms.verts > 2000 && arms.skinned, `first-person arm mesh (${arms.verts} verts, ${arms.bones} bones, skinned=${arms.skinned})`);
+
+    // Every piece of skin must be a closed surface — no holes, no open ends, nothing you can see
+    // into. A closed triangle mesh has no boundary edges (every edge is shared by exactly two faces),
+    // so count them. Garments are cut open on purpose (neckline, cuffs) and are not checked here.
+    const holes = await page.evaluate(() => {
+      const G = window.__cradle;
+      const boundaryEdges = (geo) => {
+        const idx = geo.index; if (!idx) return -1;
+        const seen = new Map(); const ia = idx.array;
+        for (let i = 0; i < ia.length; i += 3) {
+          for (const [a, b] of [[ia[i], ia[i + 1]], [ia[i + 1], ia[i + 2]], [ia[i + 2], ia[i]]]) {
+            const k = a < b ? a * 4294967296 + b : b * 4294967296 + a;
+            seen.set(k, (seen.get(k) || 0) + 1);
+          }
+        }
+        let open = 0; for (const n of seen.values()) if (n !== 2) open++;
+        return open;
+      };
+      const out = {};
+      if (G.baby?.body) out.baby = boundaryEdges(G.baby.body.geometry);
+      if (G.arms?.right?.mesh) out.arm = boundaryEdges(G.arms.right.mesh.geometry);
+      const rec = G.visitors && [...G.visitors.people.values()][0];
+      if (rec) out.visitor = boundaryEdges(rec.npc.body.geometry);
+      return out;
+    });
+    const leaky = Object.entries(holes).filter(([, n]) => n !== 0);
+    check(leaky.length === 0, `skin meshes are closed surfaces (${Object.entries(holes).map(([k, v]) => `${k}:${v}`).join(' ')} boundary edges)`);
+
     // age the baby into a toddler through the debug endpoint and make sure the model rebuilds without errors
     await j('POST', `/api/games/${id}/actions`, { id: 'put_down', params: { location: 'play_mat', position: 'sitting' } }, u.token);
     const aged = await j('POST', `/api/games/${id}/debug/advance`, { days: 730 }, u.token);
     check(aged.game.sim.days > 700, `debug advance -> ${aged.game.sim.days.toFixed(0)} days, status ${aged.game.status}`);
-    await wait(4000);
+    // The rebuild happens on the next rendered frame after the new state lands; under a software
+    // rasteriser a frame can take seconds, so wait for the rebuild itself rather than a fixed time.
+    await page.waitForFunction(() => { const G = window.__cradle; return G && G.baby && G.baby.builtDays >= 9; }, null, { timeout: 120000 }).catch(() => {});
     const rebuilt = await page.evaluate(() => { const G = window.__cradle; return { days: G.baby.days, band: G.baby.builtDays, verts: G.baby.body.geometry.attributes.position.count, cap: !!G.baby.face.cap }; });
     check(rebuilt.days > 700 && rebuilt.band >= 9, `toddler model rebuilt (band ${rebuilt.band}, ${rebuilt.verts} verts, hair cap ${rebuilt.cap})`);
     await page.evaluate(() => { const G = window.__cradle; G.controls.colliders = []; const b = G.baby.worldPosition(); G.controls.eyeHeight = 1.1; G.controls.pos.set(b.x + 0.2, 0, b.z + 1.3); G.controls.lookAt(G.baby.headWorldPosition()); G.controls.lookWeight = 1; });
-    await wait(1500); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-toddler.png') });
+    await wait(1500); await shoot('smoke-toddler.png');
 
-    const shot = path.join(process.cwd(), 'scripts', 'smoke-screenshot.png'); await page.screenshot({ path: shot }); console.log('screenshot ->', shot);
+    if (await shoot('smoke-screenshot.png')) console.log('screenshot ->', path.join(process.cwd(), 'scripts', 'smoke-screenshot.png'));
     if (process.env.SMOKE_SHOTS) {
       // put the baby in the crib and look at it from the nursery; then a close-up of the face
       await j('POST', `/api/games/${id}/actions`, { id: 'put_down', params: { location: 'crib', position: 'back' } }, u.token);
       await wait(2500);
       await page.evaluate(() => { const G = window.__cradle; G.controls.pos.set(3.4, 0, -2.2); G.controls.lookAt(G.baby.headWorldPosition()); G.controls.lookWeight = 1; });
-      await wait(1500); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-crib.png') });
+      await wait(1500); await shoot('smoke-crib.png');
       await page.evaluate(() => { const G = window.__cradle; G.controls.pos.set(4.0, 0, -3.5); G.controls.eyeHeight = 1.25; G.controls.lookAt(G.baby.headWorldPosition()); G.controls.lookWeight = 1; });
-      await wait(1500); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-face.png') });
+      await wait(1500); await shoot('smoke-face.png');
       await page.evaluate(() => { const G = window.__cradle; G.controls.colliders = []; const h = G.baby.headWorldPosition(); G.controls.eyeHeight = h.y + 0.42; G.controls.pos.set(h.x, 0, h.z + 0.06); G.controls.yaw = 0; G.controls.pitch = -1.5; G.controls.lookWeight = 0; });
-      await wait(1200); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-overhead.png') });
+      await wait(1200); await shoot('smoke-overhead.png');
       await page.evaluate(() => { const G = window.__cradle; const b = G.baby.worldPosition(); G.controls.eyeHeight = b.y + 0.22; G.controls.pos.set(b.x, 0, b.z + 0.75); G.controls.yaw = 0; G.controls.pitch = -0.3; G.controls.lookWeight = 0; });
-      await wait(1200); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-side.png') });
+      await wait(1200); await shoot('smoke-side.png');
       await page.evaluate(() => { const G = window.__cradle; G.baby.debug = { noCloth: true, skeleton: true }; const h = G.baby.headWorldPosition(); G.controls.eyeHeight = h.y + 0.5; G.controls.pos.set(h.x + 0.15, 0, h.z + 0.02); G.controls.yaw = 0; G.controls.pitch = -1.5; });
-      await wait(1200); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-skeleton.png') });
+      await wait(1200); await shoot('smoke-skeleton.png');
       await page.evaluate(() => { const G = window.__cradle; G.baby.debug = {}; });
       await page.evaluate(() => { const G = window.__cradle; G.controls.eyeHeight = 1.62; G.controls.pos.set(-1.5, 0, 3.9); G.controls.yaw = 0; G.controls.pitch = -0.1; G.controls.lookWeight = 0; });
-      await wait(1200); await page.screenshot({ path: path.join(process.cwd(), 'scripts', 'smoke-room.png') });
+      await wait(1200); await shoot('smoke-room.png');
     }
     check(errors.length === 0, `no browser errors${errors.length ? ': ' + errors.slice(0, 5).map((e) => e.replace(/\s+/g, ' ').slice(0, 600)).join(' | ') : ''}`);
     await browser.close();

@@ -123,7 +123,7 @@ const chaotic = (g, rng) => {
   // Fuzz: fire random valid-and-invalid actions to prove nothing throws and nothing corrupts state.
   const ids = ['feed', 'burp', 'change_diaper', 'bathe', 'dress', 'hold', 'put_down', 'rock', 'sing', 'play', 'tummy_time',
     'read', 'put_to_sleep', 'pacifier', 'swaddle', 'white_noise', 'check_temp', 'medicine', 'vitamin_d', 'doctor', 'lesson',
-    'potty', 'move', 'yell', 'scream', 'leave', 'return', 'babysitter', 'collect_package', 'nurse_visit', 'thermostat',
+    'potty', 'move', 'yell', 'scream', 'smack', 'leave', 'return', 'babysitter', 'collect_package', 'nurse_visit', 'thermostat',
     'cuddle', 'talk', 'wash_bottles', 'choice', 'nonexistent_action'];
   const id = ids[rng.int(0, ids.length - 1)];
   const params = { type: ['formula', 'puree', 'honey', 'milk', 'water', 'bogus'][rng.int(0, 5)],

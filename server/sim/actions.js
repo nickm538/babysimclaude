@@ -5,7 +5,8 @@ import { mk, doctorVisit } from './health.js';
 import { diaperCount, takeDiaper } from './events.js';
 import { makeRng } from './rng.js';
 import { EXTRA_HANDLERS } from './actions2.js';
-import { resolveChoice } from './story.js';
+import { resolveChoice, notify } from './story.js';
+import { addMemory } from './storyChapters.js';
 
 const TOY_INDEX = Object.fromEntries(TOYS.map((t) => [t.id, t]));
 const LESSON_INDEX = Object.fromEntries(LESSONS.map((l) => [l.id, l]));
@@ -439,6 +440,51 @@ const HANDLERS = {
     s.cryingSince = s.cryingSince || game.sim.time; s.cryCause = 'scared'; s.cryIntensity = 1; s.lastAnsweredCryAt = 0;
     log(game, 'temper', `You screamed in ${b.name}'s face. ${b.sex === 'girl' ? 'She' : 'He'} is shaking and inconsolable. This is the kind of moment a child never forgets.`, 'danger');
     return ok('You screamed at your baby.');
+  },
+
+  // Hitting a child. This is in the game because the game is about consequences, and this is the one
+  // every parent is told never to do: it is the most damaging thing in the whole action list. It
+  // hurts, it terrifies, it collapses trust and self-esteem far faster than shouting, it makes
+  // behaviour worse rather than better, and it accumulates — a pattern of it is visible to the health
+  // visitor and is recorded against the ending. There is no version of this that goes well.
+  smack(game, { hard = false } = {}) {
+    const b = game.baby, e = b.emo, s = b.state, days = ageDays(game), t = game.sim.time;
+    game.parent.tempers.smacks = (game.parent.tempers.smacks || 0) + 1;
+    game.stats.smacks = (game.stats.smacks || 0) + 1;
+    const severe = !!hard || days < 365;   // striking an infant is categorically worse
+    e.trust = clamp(e.trust - (severe ? 26 : 18));
+    e.happiness = clamp(e.happiness - (severe ? 30 : 22));
+    e.security = clamp(e.security - (severe ? 26 : 18));
+    e.esteem = clamp(e.esteem - (severe ? 22 : 15));
+    e.stress = clamp(e.stress + (severe ? 55 : 42));
+    b.needs.comfort = clamp(b.needs.comfort - 40);
+    b.needs.health = clamp(b.needs.health - (severe ? 8 : 3));
+    // Self-regulation is the thing being hit actually destroys: a child learns that big feelings end
+    // in being hurt, so they get worse at handling them, not better.
+    b.dev.emotional = clamp(b.dev.emotional - (severe ? 0.5 : 0.3));
+    b.dev.social = clamp(b.dev.social - 0.15);
+    b.injuries.push({ kind: 'smack', at: t, healAt: t + (severe ? 2 : 1) * DAY, pain: severe ? 12 : 6, severe });
+    wakeIfSleeping(game, 'hit', false);
+    s.cryingSince = s.cryingSince || t; s.cryCause = 'scared'; s.cryIntensity = 1; s.lastAnsweredCryAt = 0;
+    if (!b.history.firstSmackAt) b.history.firstSmackAt = t;
+    const her = b.sex === 'girl' ? 'her' : 'him', she = b.sex === 'girl' ? 'She' : 'He';
+    log(game, 'temper', `You hit ${b.name}. ${days < 365
+      ? `${she} is far too young to connect the pain with anything at all — only that the person ${she.toLowerCase()} depends on hurt ${her}.`
+      : `${she} froze, then screamed — not the angry cry, the frightened one. ${she} does not know what to do with ${her} own hands.`} This does not teach anything except fear.`, 'danger');
+    notify(game, {
+      kind: 'danger', sev: 'danger', title: 'You hit your child',
+      text: `Physical punishment does not reduce the behaviour it punishes — it reliably increases aggression, anxiety and defiance, and it is the fastest way there is to lose a child's trust. ${b.name} is hurt and frightened.`,
+    });
+    addMemory(game, `the day you hit ${b.name.toLowerCase() === b.name ? 'them' : b.name}`, 96, 'hard');
+    if (game.story && game.story.chapter) game.story.chapter.tempers++;
+    // A pattern gets noticed. The health visitor's next contact is not a friendly one.
+    const smacks = game.parent.tempers.smacks;
+    if (smacks === 3 || smacks === 8 || smacks % 15 === 0) {
+      game.parent.safeguarding = (game.parent.safeguarding || 0) + 1;
+      log(game, 'delay', `The health visitor has asked to come round and talk about how things are going at home. Bruising and a frightened child do get noticed.`, 'warn');
+      notify(game, { kind: 'story', sev: 'warn', title: 'A visit has been requested', text: `Someone has raised a concern about ${b.name}. A health visitor wants to talk with you.` });
+    }
+    return ok('You hit your child.');
   },
 
   leave(game, { minutes = 30 }) {

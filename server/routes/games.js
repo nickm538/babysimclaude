@@ -4,6 +4,7 @@ import { babyReply, llmAvailable } from '../ai/babyChat.js';
 import { applyAction } from '../sim/actions.js';
 import { advance, collect } from '../sim/engine.js';
 import { rateLimit } from '../ratelimit.js';
+import { ensureSocial } from '../sim/social.js';
 import { SHOP, TOYS, LESSONS, BABYPROOFING, CLOTHING_SIZES, DIAPER_SIZES, MILESTONES, CHECKUPS, VACCINES, ILLNESSES, TIME } from '../../shared/constants.js';
 
 export function gameRoutes(store, gm) {
@@ -70,16 +71,37 @@ export function gameRoutes(store, gm) {
     await store.appendChat(g.id, { role: 'baby', content: out.reply, tone: null, t });
     g.chat.push({ role: 'parent', content: text, tone: out.tone, t }, { role: 'baby', content: out.reply, t });
     if (g.chat.length > 40) g.chat.splice(0, g.chat.length - 40);
-    const result = await gm.act(g.id, 'talk', { tone: out.tone });
-    const b = g.baby;
-    b.needs.affection = clampN(b.needs.affection + out.effects.affection);
-    b.needs.stimulation = clampN(b.needs.stimulation + out.effects.stimulation);
-    b.emo.stress = clampN(b.emo.stress + out.effects.stress);
-    res.json({ reply: out.reply, tone: out.tone, source: out.source, action: result, game: gm.view(g.id) });
+
+    // What was said lands on the child, and if it was a request, the child may actually do it. Both
+    // run through the manager so the change is authoritative, journalled, broadcast and saved like
+    // any other action — talking is not a special case that bypasses the simulation.
+    const said = await gm.chat(g.id, text, out.tone, out.effects, out.request || null, out.word || '');
+    res.json({
+      reply: out.reply, tone: out.tone, source: out.source,
+      action: said.talk, words: said.words, outcome: said.outcome,
+      game: gm.view(g.id),
+    });
   });
 
   // Debug/testing only: jump the baby forward in time (CRADLE_DEBUG=1). Runs the normal simulation.
   if (process.env.CRADLE_DEBUG === '1') {
+    // Put a visitor in the living room right now, so the NPC rendering path can be exercised without
+    // waiting for the social layer to schedule a visit. Debug builds only.
+    r.post('/:id/debug/visitor', async (req, res) => {
+      const g = await own(req, res); if (!g) return;
+      const s = ensureSocial(g);
+      const c = s.contacts[Math.max(0, Math.min(s.contacts.length - 1, Number(req.body?.index) || 0))];
+      if (!c) return res.status(400).json({ error: 'No contacts' });
+      g.house.visitor = {
+        contactId: c.id, name: c.name, relation: c.relation,
+        relationLabel: c.relation, personality: c.personality,
+        since: g.sim.time, until: g.sim.time + 3 * 3600,
+        activity: String(req.body?.activity || 'holding the baby').slice(0, 40),
+      };
+      const entry = gm.games.get(g.id); await gm.persist(entry, [], true); gm.broadcast(entry, []);
+      res.json({ ok: true, visitor: g.house.visitor, game: gm.view(g.id) });
+    });
+
     r.post('/:id/debug/advance', async (req, res) => {
       const g = await own(req, res); if (!g) return;
       const days = Math.max(0, Math.min(2000, Number(req.body?.days) || 0));

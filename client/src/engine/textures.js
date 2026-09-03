@@ -62,7 +62,23 @@ export function woodTexture({ size = 512, base = '#8a5a34', dark = '#5b3a1e', re
     const hv = (0.5 + (1 - t) * 0.4) * edge; hd[i] = hd[i + 1] = hd[i + 2] = hv * 255; hd[i + 3] = 255;
   }
   ctx.putImageData(img, 0, 0); hctx.putImageData(himg, 0, 0);
-  const out = { map: toTexture(c, repeat), normalMap: toTexture(normalFromHeight(hc, 1.6), repeat, false), roughness: 0.55 };
+  // Open grain pores scatter; the hard latewood between them holds a sheen. Varnish sits on top of
+  // both, so the contrast is subtle — but it is the difference between timber and brown plastic.
+  const rc = canvas(size), rctx = rc.getContext('2d'), rimg = rctx.createImageData(size, size), rd = rimg.data;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const i = (y * size + x) * 4;
+    const grain = hd[i] / 255;
+    const pore = Math.pow(fbm(x / 2.2, y / 5.5, seed + 7, 2), 3);
+    const v = 0.42 + (1 - grain) * 0.2 + pore * 0.3;
+    rd[i] = rd[i + 1] = rd[i + 2] = Math.max(0, Math.min(1, v)) * 255; rd[i + 3] = 255;
+  }
+  rctx.putImageData(rimg, 0, 0);
+  const out = {
+    map: toTexture(c, repeat),
+    normalMap: toTexture(normalFromHeight(hc, 1.6), repeat, false),
+    roughnessMap: toTexture(rc, repeat, false),
+    roughness: 1.0,
+  };
   cache.set(key, out); return out;
 }
 
@@ -98,7 +114,22 @@ export function fabricTexture({ size = 256, color = '#6d7f8c', repeat = 6, seed 
     hd[i] = hd[i + 1] = hd[i + 2] = w * 255; hd[i + 3] = 255;
   }
   ctx.putImageData(img, 0, 0); hctx.putImageData(himg, 0, 0);
-  const out = { map: toTexture(c, repeat), normalMap: toTexture(normalFromHeight(hc, 1.2), repeat, false), roughness: 0.95 };
+  // Thread crowns catch a little more light than the valleys between them. A single roughness number
+  // makes woven cloth look like painted plastic; this is what gives it a surface.
+  const rc = canvas(size), rctx = rc.getContext('2d'), rimg = rctx.createImageData(size, size), rd = rimg.data;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const i = (y * size + x) * 4;
+    const crown = hd[i] / 255;
+    const v = 0.99 - crown * 0.22 + (fbm(x / 7, y / 7, seed + 3, 2) - 0.5) * 0.1;
+    rd[i] = rd[i + 1] = rd[i + 2] = Math.max(0, Math.min(1, v)) * 255; rd[i + 3] = 255;
+  }
+  rctx.putImageData(rimg, 0, 0);
+  const out = {
+    map: toTexture(c, repeat),
+    normalMap: toTexture(normalFromHeight(hc, 1.2), repeat, false),
+    roughnessMap: toTexture(rc, repeat, false),
+    roughness: 1.0,
+  };
   cache.set(key, out); return out;
 }
 
@@ -289,6 +320,79 @@ export function skinDetailTexture(size = 256) {
   cache.set('skin', t); return t;
 }
 
+// A second, much finer normal map for skin. Real skin has two scales of relief: the fold/crease
+// scale the mesh already carries, and a micro scale of pores and vellus follicles that only shows as
+// a specular break-up. Without it, a highlight slides across a cheek like it would across plastic.
+export function skinMicroTexture(size = 256) {
+  if (cache.has('skinMicro')) return cache.get('skinMicro');
+  const hc = canvas(size), hctx = hc.getContext('2d'), img = hctx.createImageData(size, size), d = img.data;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    // tight pore noise plus a sparser scatter of deeper follicles
+    const pore = fbm(x / 1.35, y / 1.35, 41, 2);
+    const follicle = Math.pow(fbm(x / 2.6, y / 2.6, 42, 1), 6) * 0.8;
+    const v = 0.5 + (pore - 0.5) * 0.5 - follicle * 0.35;
+    const i = (y * size + x) * 4; d[i] = d[i + 1] = d[i + 2] = Math.max(0, Math.min(1, v)) * 255; d[i + 3] = 255;
+  }
+  hctx.putImageData(img, 0, 0);
+  const t = toTexture(normalFromHeight(hc, 0.85), 8, false);
+  cache.set('skinMicro', t); return t;
+}
+
+// A fine surface grain — orange-peel on paint, moulding grain on plastic, the tooth on card — shared
+// by every prop that used to be a flat colour. It is nearly invisible head-on and shows as a slight
+// break-up of highlights and reflections, which is the difference between a rendered sphere and a
+// toy someone could pick up. One small tileable pair, cached, so it costs one texture.
+export function grainTexture() {
+  if (cache.has('grain')) return cache.get('grain');
+  const size = 128;
+  const hc = canvas(size), hctx = hc.getContext('2d'), himg = hctx.createImageData(size, size), hd = himg.data;
+  const rc = canvas(size), rctx = rc.getContext('2d'), rimg = rctx.createImageData(size, size), rd = rimg.data;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const i = (y * size + x) * 4;
+    const peel = fbm(x / 4.5, y / 4.5, 33, 3), fine = fbm(x / 1.6, y / 1.6, 34, 2);
+    const h = 0.5 + (peel - 0.5) * 0.5 + (fine - 0.5) * 0.25;
+    hd[i] = hd[i + 1] = hd[i + 2] = h * 255; hd[i + 3] = 255;
+    const r = 0.5 + (peel - 0.5) * 0.35 + (fine - 0.5) * 0.15;
+    rd[i] = rd[i + 1] = rd[i + 2] = Math.max(0, Math.min(1, r)) * 255; rd[i + 3] = 255;
+  }
+  hctx.putImageData(himg, 0, 0); rctx.putImageData(rimg, 0, 0);
+  const out = { normalMap: toTexture(normalFromHeight(hc, 0.6), 6, false), roughnessMap: toTexture(rc, 6, false) };
+  cache.set('grain', out); return out;
+}
+
+// Drop-in for `new THREE.MeshStandardMaterial({ color, roughness, ... })`: same options, but a physical
+// material carrying the grain above, so the surface has a texture whatever colour it is painted.
+// A roughness given here becomes the mean the map varies around.
+export function matte(opts = {}) {
+  const g = grainTexture();
+  const { color = 0xffffff, roughness = 0.7, ...rest } = opts;
+  return new THREE.MeshPhysicalMaterial({
+    color, roughness: Math.min(1, roughness * 1.15), metalness: 0,
+    normalMap: g.normalMap, normalScale: new THREE.Vector2(0.28, 0.28),
+    roughnessMap: g.roughnessMap,
+    ...rest,
+  });
+}
+
 export function stdMaterial(tex, extra = {}) {
-  return new THREE.MeshStandardMaterial({ map: tex.map, normalMap: tex.normalMap || null, normalScale: new THREE.Vector2(0.6, 0.6), roughness: tex.roughness ?? 0.8, metalness: 0, ...extra });
+  return new THREE.MeshStandardMaterial({
+    map: tex.map, normalMap: tex.normalMap || null, roughnessMap: tex.roughnessMap || null,
+    normalScale: new THREE.Vector2(0.6, 0.6), roughness: tex.roughness ?? 0.8, metalness: 0, ...extra,
+  });
+}
+
+// Cloth. The thing that separates fabric from a matte solid is sheen: the retroreflective halo along
+// a grazing edge, where light scatters off the fuzz standing up out of the weave. A sofa arm without
+// it reads as painted board no matter how good the albedo is.
+export function clothMaterial(tex, { sheen = 0.6, sheenTint = 0.5, extra = {} } = {}) {
+  const base = new THREE.Color(0xffffff);
+  return new THREE.MeshPhysicalMaterial({
+    map: tex.map, normalMap: tex.normalMap || null, roughnessMap: tex.roughnessMap || null,
+    normalScale: new THREE.Vector2(0.85, 0.85),
+    roughness: tex.roughness ?? 0.95, metalness: 0,
+    sheen, sheenRoughness: 0.75,
+    sheenColor: base.clone().multiplyScalar(sheenTint),
+    envMapIntensity: 0.45,
+    ...extra,
+  });
 }

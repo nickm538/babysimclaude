@@ -551,6 +551,26 @@ const LOCAL_HANDLERS = {
     return ok('Sunscreen on.');
   },
 
+  // Washing up together. A three-year-old at a sink is not help — it is a lesson in being trusted
+  // with something that matters, paid for in water on the floor.
+  chore_dishes(game, _, rng) {
+    const b = game.baby, n = b.needs, days = ageDays(game);
+    const gate = needAge(game, 1095, 'washing up') || needAwake(game); if (gate) return gate;
+    if (game.inventory.bottles > 0 && game.inventory.bottlesClean < game.inventory.bottles) {
+      game.inventory.bottlesClean = game.inventory.bottles;
+    }
+    const k = count(game, 'dishes'), eff = diminish(k, 2) * effort(game);
+    touch(game);
+    gain(game, { motor: 0.014, cognitive: 0.008, social: 0.006, emotional: 0.006 }, eff);
+    n.stimulation = clamp(n.stimulation + 12 * eff); n.affection = clamp(n.affection + 5); n.clean = clamp(n.clean - 8);
+    b.emo.esteem = clamp(b.emo.esteem + 2.5 * eff);
+    const soaked = rng.chance(0.55);
+    log(game, 'chore', soaked
+      ? `${b.name} washes up beside you on the step stool. Both sleeves are soaked, the floor is a lake, and ${he(b)} has never looked prouder.`
+      : `${b.name} washes up beside you, very slowly and very seriously, mostly rearranging the bubbles.`, 'good');
+    return ok(soaked ? 'Dishes done. Floor destroyed.' : 'Dishes done together.');
+  },
+
   // ------------------------------------------------------------------ chores together (2y+)
   water_plants(game, _, rng) {
     const b = game.baby, n = b.needs, x = ext(game);

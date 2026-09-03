@@ -5,7 +5,7 @@ import { buildBabyBody } from './babyMesh.js';
 import { buildFace, updateFace } from './babyFace.js';
 import { BabyAnimator } from './babyAnimator.js';
 import { makeSkinMaterial, setSkinState } from './skinMaterial.js';
-import { fabricTexture, stdMaterial } from '../engine/textures.js';
+import { fabricTexture, clothMaterial } from '../engine/textures.js';
 import { SPOTS } from '../world/house.js';
 
 const OUTFIT_COLORS = { white: '#f5f1ea', mint: '#bfe6d2', sky: '#bcd8f2', peach: '#f7cdb9', lilac: '#d9c7ee', lemon: '#f6e7a6', grey: '#cfd2d6', navy: '#3f4d6b', rose: '#efb2c0' };
@@ -32,8 +32,10 @@ export class Baby {
     if (!this.mats) {
       this.mats = {
         skin: makeSkinMaterial({ skinTone: b.appearance.skinTone, blush: 0.32 * (b.appearance.cheekiness || 1) }),
-        cloth: stdMaterial(fabricTexture({ color: OUTFIT_COLORS[b.wear.outfit] || '#f5f1ea', repeat: 14, weave: 3 }), { roughness: 1 }),
-        diaper: new THREE.MeshStandardMaterial({ color: 0xfbfaf7, roughness: 0.95 }),
+        // A onesie is soft knitted cotton: high roughness with a sheen halo at grazing angles. The
+        // nappy is the opposite — a matte, slightly waxy nonwoven that catches almost nothing.
+        cloth: clothMaterial(fabricTexture({ color: OUTFIT_COLORS[b.wear.outfit] || '#f5f1ea', repeat: 14, weave: 3 }), { sheen: 0.8, sheenTint: 0.85 }),
+        diaper: clothMaterial(fabricTexture({ color: '#fbfaf7', repeat: 22, weave: 2, seed: 6 }), { sheen: 0.25, sheenTint: 0.6, extra: { roughness: 0.92 } }),
       };
     }
     const built = buildBabyBody({ days: Math.max(0, days), skinMat: this.mats.skin, clothMat: this.mats.cloth, diaperMat: this.mats.diaper, res: /iPhone|iPad|Android/i.test(navigator.userAgent) ? 72 : 88 });
@@ -51,7 +53,7 @@ export class Baby {
     const col = OUTFIT_COLORS[name] || '#f5f1ea';
     if (this.outfitName === name) return; this.outfitName = name;
     const tex = fabricTexture({ color: col, repeat: 14, weave: 3 });
-    this.mats.cloth.map = tex.map; this.mats.cloth.normalMap = tex.normalMap; this.mats.cloth.needsUpdate = true;
+    this.mats.cloth.map = tex.map; this.mats.cloth.normalMap = tex.normalMap; this.mats.cloth.roughnessMap = tex.roughnessMap; this.mats.cloth.needsUpdate = true;
   }
 
   // Compute world placement for a spot & state

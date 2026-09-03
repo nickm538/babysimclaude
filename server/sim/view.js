@@ -1,6 +1,6 @@
 // Client-safe view of a game (no seeds/internal counters), plus the per-tick delta the socket sends.
 import { ageDays, clockSeconds, isNight, distressOf, expectedDev, ageToys } from './engine.js';
-import { neededSizes } from './state.js';
+import { neededSizes , ensureGameShape } from './state.js';
 import { stageFor, MILESTONES, CHECKUPS, VACCINES, LESSONS, TOYS, ILLNESSES, TIME, DAY, HOUR } from '../../shared/constants.js';
 import { growthPercentile } from './health.js';
 import { computeMood } from './mood.js';
@@ -10,6 +10,7 @@ import { ensureSocial, socialView } from './social.js';
 import { isMobile } from './events.js';
 
 export function gameView(game) {
+  ensureGameShape(game);
   ensureStory(game); ensureSocial(game);
   const b = game.baby, days = ageDays(game), t = game.sim.time;
   const mood = computeMood(game);

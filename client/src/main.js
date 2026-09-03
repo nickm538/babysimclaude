@@ -17,6 +17,7 @@ import { authScreen, gameSelectScreen, awayModal, deathModal, winModal, chooserM
 import { NotificationCenter } from './ui/notifications.js';
 import { buildArt } from './world/art.js';
 import { Effects } from './engine/effects.js';
+import { Visitors } from './characters/visitors.js';
 import { chooseWord, chooseAllergen, chooseDiscipline, choosePlayActivity, chooseLearn, chooseCare, chooseChores, showObservation, ACTION_DUR } from './ui/interactions.js';
 
 const $boot = document.getElementById('boot'), $status = document.getElementById('boot-status');
@@ -109,8 +110,16 @@ function buildWorld(view) {
   G.alerts.attachBell(document.getElementById('fab-alerts'));
   try { G.art = buildArt(R.scene, { name: view.baby.name }); } catch (e) { console.warn('[art]', e.message); }
   try { G.effects = new Effects(R.scene); } catch (e) { console.warn('[effects]', e.message); }
+  // People the social layer sends round now actually stand in the room.
+  try { G.visitors = new Visitors(R.scene, { mobile: R.isMobile }); } catch (e) { console.warn('[visitors]', e.message); }
   G.phone = new Phone(overlay, { run: (id, p, o) => runAction(G, id, p, o), setSpeed: (s) => setSpeed(G, s), audio, switchGame: () => restart(), signOut: () => { api.setToken(null); location.reload(); }, playdate: (kind, arg) => playdate(G, kind, arg), get tts() { return G.tts; }, set tts(v) { G.tts = v; } });
-  G.chat = new Chat(overlay, { nearBaby: () => G.near.baby || (store.view && store.view.baby.state.held), onReply: (text) => { if (G.tts && audio.ctx) audio.speak(text, store.view.sim.days); }, onSpeak: () => { controls.lookAt(baby.headWorldPosition()); } });
+  G.chat = new Chat(overlay, {
+    nearBaby: () => G.near.baby || (store.view && store.view.baby.state.held),
+    onReply: (text) => { if (G.tts && audio.ctx) audio.speak(text, store.view.sim.days); },
+    onSpeak: () => { controls.lookAt(baby.headWorldPosition()); },
+    // The child did what you asked — celebrate it in the room, not just in the thread.
+    onDid: () => { try { G.effects?.emit('sparkle', baby.headWorldPosition().add(new THREE.Vector3(0, 0.16, 0)), 18); } catch { /* baby not in the room */ } },
+  });
   controls.onStep = () => audio.footstep();
   R.onFrame.push((dt) => frame(G, dt));
   R.start();
@@ -126,6 +135,7 @@ function frame(G, dt) {
   const v = store.view; if (!v) return;
   G.controls.update(dt);
   G.effects?.update(dt);
+  G.visitors?.update(dt);
   G.baby.update(v, dt, G.R.camera, G.heldRig);
   G.arms.update(dt);
   if (G.guest) G.guest.update(G.guestView, dt, G.R.camera, new THREE.Group());
@@ -305,8 +315,21 @@ async function uiAction(G, what) {
       { label: '😠 Yell at the baby', id: 'yell', cls: 'danger', sub: 'trust −8, big stress' },
       { label: '🤬 Scream in their face', id: 'scream', cls: 'danger', sub: 'trust −15, terror' },
       { label: '🚪 Walk out and shut the door (30 min)', id: 'leave', cls: 'danger', sub: 'trust −10 and falling' },
+      { label: '✋ Smack them', id: 'smack', cls: 'danger', sub: 'the most damaging thing on this list' },
     ], { text: `You're exhausted (energy ${Math.round(v.parent.energy)}, stress ${Math.round(v.parent.stress)}). Real parents feel this. What you do with it is the whole test. There is no undo.` });
-    if (pick) { if (pick.id === 'leave') { runAction(G, 'leave', { minutes: 30 }, { anim: 'none', remote: true }); } else runAction(G, pick.id, {}, { anim: 'none', dur: 2, look: true }); }
+    if (!pick) return;
+    if (pick.id === 'smack') {
+      // A second, deliberate step. Not to lecture — to make sure this is a decision and not a
+      // mis-tap, because in this game it is the one action that cannot be walked back.
+      const sure = await chooserModal(overlay, `Hit ${v.baby.name}?`, [
+        { label: 'No — put them down and step away', id: 'no' },
+        { label: `Yes, smack ${v.baby.name}`, id: 'yes', cls: 'danger' },
+      ], { text: 'Hitting does not reduce the behaviour it punishes. It reliably increases aggression, anxiety and defiance, and it is the fastest way there is to lose a child\'s trust. This is permanent and it will be remembered.' });
+      if (sure && sure.id === 'yes') runAction(G, 'smack', {}, { anim: 'none', dur: 2, look: true });
+      else if (sure) runAction(G, 'put_down', { location: 'crib', position: 'back' }, { anim: 'none', dur: 3 });
+      return;
+    }
+    if (pick.id === 'leave') { runAction(G, 'leave', { minutes: 30 }, { anim: 'none', remote: true }); } else runAction(G, pick.id, {}, { anim: 'none', dur: 2, look: true });
   }
 }
 
@@ -323,6 +346,7 @@ function onEvent(G, e) {
 
 function onView(G, v, prev) {
   if (G.alerts) G.alerts.update(v, store.lastEvents || []);
+  try { G.visitors?.sync(v, v.baby.state.held || v.baby.state.hospitalized ? null : G.baby.headWorldPosition()); } catch (e) { console.warn('[visitors]', e.message); }
   if (!prev) return;
   if (v.status === 'dead' && prev.status !== 'dead') { G.audio.setCrying(false); deathModal(overlay, v, () => restart()); }
   if (v.status === 'won' && prev.status !== 'won') winModal(overlay, v, () => restart());

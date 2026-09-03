@@ -11,7 +11,13 @@ tantrum and mistake is simulated on the server and saved to a database, so the b
   courses, fever, prescriptions, hospitalization, vaccines and well-child checkups on the real schedule, teething, colic, jaundice,
   diaper rash, choking/food-safety rules (honey, cow's milk, water, solids too early), medicine dosing/overdose rules, safe-sleep
   risk, household hazards mitigated by baby-proofing, a babysitter, deliveries to the front door, homeschool lessons, potty training,
-  playdates, and losing your temper (yell / scream / walk out) with the consequences those have in real life.
+  playdates, and losing your temper — yelling, screaming, walking out, or hitting — with the consequences those have in real life.
+  Physical punishment is the most damaging action in the game by a wide margin: it hurts, it terrifies, it costs trust, security and
+  self-esteem faster than shouting does, it makes self-regulation and compliance *worse* rather than better, it is recorded as an
+  injury, and a pattern of it brings the health visitor round. There is no version of it that goes well, which is the point.
+- **Self-esteem** is a tracked emotional stat alongside happiness, trust, security and stress. It is built by praise, by being
+  answered, and by being trusted with something and managing it; it is eroded by being shouted at, called names, hit or ignored. It
+  moves slowly in both directions.
 - **Death and success**: the baby can die (starvation, untreated illness, unsafe sleep, accidents, poisoning, failure to thrive). It
   takes a lot, but it is possible. The game is won when the child turns five; the outcome is graded on health, happiness, trust and
   development.
@@ -30,17 +36,30 @@ tantrum and mistake is simulated on the server and saved to a database, so the b
   stand-in carer who feeds and changes **from your supplies** and runs out if you left none, but gives none of the affection. When you
   come back you get a summary and the chapter written while you were gone: the baby may have napped, played, filled a diaper, crawled
   to the stairs, eaten something off the floor, or got sick.
-- **Live chat with the baby**: age-aware responses (newborn body language → babble → toddler sentences → preschooler stories) from the
-  Anthropic API with a rule-based fallback, fed the story summary so the baby's replies reflect the life it has actually had. Your
-  tone is classified — harsh messages count as yelling.
+- **Talking to your child is gameplay, not decoration** (`server/ai/chatIntent.js`): age-aware replies (newborn body language →
+  babble → toddler sentences → preschooler stories) come from the Anthropic API with a rule-based fallback, fed the story summary so
+  they reflect the life the child has actually had. On top of that, every message does two real things. Its **emotional content
+  lands**: "I love you" builds self-esteem, happiness and trust; "I hate you" tears all three down and makes a child of any age cry,
+  because tone carries even before words do. Cruelty costs more than praise gives, and apologising after you have lost your temper
+  genuinely repairs some of it — but never all. Second, if you **asked for something**, it may actually happen: "go wash the dishes"
+  puts a three-year-old on a stool at the sink with both sleeves soaked. Whether they do it depends on age, language, self-regulation,
+  trust, tiredness, hunger, stress and how big the ask is — a tired two-year-old with low trust mostly says no, and should. The
+  request is executed through the ordinary action layer, so it is journalled, broadcast and saved like anything else. The model may
+  spot a paraphrase the patterns miss, but it only ever *names* a request; the simulation alone decides the outcome.
 - **43 further interactions** (`server/sim/actions2.js`, `actions3.js`): teaching words that build a real vocabulary, naming body
   parts, dialogic reading, introducing allergens one at a time (with real reactions and real tolerance), praise vs. gentle correction
   vs. time-in, peekaboo, massage, skin-to-skin, sensory play, night checks, dream feeds, nail trims, first haircut, sunscreen, chores
   done together, and simply watching for a minute — which changes nothing except that you were there.
-- **3D client** (`client/`): Three.js first-person house (living room, nursery nook, kitchen corner, stairs, front door), procedural PBR
-  textures, day/night lighting, and a fully procedural baby: a metaball/marching-cubes body with a skeleton, expression morph targets,
-  eyes that track you and blink, hair strands, a subsurface-scattering skin shader, growth-based proportions, crawling/walking
-  between spots, first-person arms holding bottles/diapers/books. No downloaded assets.
+- **3D client** (`client/`): Three.js first-person house (living room, nursery nook, kitchen corner, stairs, front door) with profiled
+  skirting and coving, procedural PBR textures with roughness maps and sheen on every fabric, day/night lighting with a 4096² shadow
+  map fitted to the room, and a **GTAO + SMAA post-processing pipeline** for contact occlusion — with an adaptive quality controller
+  that drops it on hardware that cannot hold a frame rate, and skips it outright on software renderers.
+- **Procedural people, no downloaded assets**: the baby, the visitors the social layer sends round, and your own arms all come from one
+  pipeline — a metaball field polygonised with marching cubes, Taubin-smoothed so no grid shows, skinned to a skeleton. The skin
+  shader samples two scales of relief triplanar (the meshes have no UVs), scatters light by screen-space curvature so ears and
+  fingertips glow and backs do not, and has procedural blush, pallor and jaundice. Eyes are solid — an opaque ball with a tear-film
+  clearcoat and a painted iris — never a transparent sphere. Hair is anisotropic, over a solid scalp. Clothing is cut from a
+  whole-body shell so it always encloses the skin. The smoke test verifies every skin mesh is a closed surface.
 - **Procedural audio**: synthesized cries (formant-filtered, intensity-driven), coos, giggles, babble, breathing, room tone, birds by
   day, crickets at night, doorbell, footsteps, music-box mobile, white noise, and optional speech synthesis for toddler talk.
 - **Multiplayer playdates**: share a 6-letter code; the other baby appears in your living room and both children gain social skills
@@ -95,7 +114,9 @@ Never enable this in production.
 
 `npm run smoke` needs Playwright to be importable: either `npm i -D playwright` (downloads Chromium) or point it at an existing install
 with `SMOKE_PW_PATH=/path/to/playwright/index.mjs` and `SMOKE_CHROME=/path/to/chrome`. `SMOKE_SHOTS=1` writes extra screenshots
-to `scripts/`. Without Playwright the REST/WebSocket half still runs and the browser half is skipped.
+to `scripts/`. Without Playwright the REST/WebSocket half still runs and the browser half is skipped. `SMOKE_DATABASE_URL=postgresql://…`
+runs the whole smoke against a real Postgres — the path Railway takes — and `TEST_DATABASE_URL` enables the 11 Postgres store tests
+in `npm test`.
 
 To reproduce one specific baby exactly — same seed, appearance, temperament and circle of people — pass an `id` to `createGame`:
 `createGame({ userId, babyName: 'Wren', id: 'repro-1' })`. Everything random about a newborn derives from it.

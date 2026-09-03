@@ -1,8 +1,10 @@
 // Authoritative game runtime: in-memory cache of games, real-time ticking for connected players,
 // offline catch-up on load, persistence and event fan-out.
-import { TIME } from '../shared/constants.js';
-import { createGame } from './sim/state.js';
+import { TIME, clamp } from '../shared/constants.js';
+import { createGame, ensureGameShape } from './sim/state.js';
 import { advance, collect, log } from './sim/engine.js';
+import { makeRng } from './sim/rng.js';
+import { parseIntent, applyWords, resolveCommand } from './ai/chatIntent.js';
 import { applyAction, placeOrder } from './sim/actions.js';
 import { gameView } from './sim/view.js';
 import { writeChapterNow, ensureStory } from './sim/story.js';
@@ -26,7 +28,7 @@ export class GameManager {
   async load(id) {
     let entry = this.games.get(id);
     if (entry) { entry.lastTouch = Date.now(); return entry.game; }
-    const game = await this.store.getGame(id);
+    const game = ensureGameShape(await this.store.getGame(id));
     if (!game) return null;
     entry = { game, subscribers: new Set(), lastSave: Date.now(), lastTouch: Date.now() };
     this.games.set(id, entry);
@@ -148,6 +150,44 @@ export class GameManager {
     this.broadcast(entry, events);
     await this.persist(entry, events, true);
     return result;
+  }
+
+  // Everything a typed message does to the world, in one authoritative place: the tone lands as the
+  // existing `talk` action, the words themselves move trust/esteem/happiness, and a request the child
+  // understands and is willing to do is executed as a real action.
+  async chat(id, text, tone, effects, hint = null, hintWord = '') {
+    const entry = this.games.get(id) || (await this.load(id), this.games.get(id));
+    if (!entry) return { talk: { ok: false, message: 'Game not found' } };
+    const g = entry.game;
+    const rng = makeRng((g.sim.seed ^ (g.sim.steps * 2654435761) ^ (text.length * 40503)) >>> 0);
+    let talk, words = [], outcome = null;
+    const events = collect(() => {
+      talk = applyAction(g, 'talk', { tone });
+      const b = g.baby, n = b.needs, e = b.emo;
+      if (effects) {
+        n.affection = clamp(n.affection + effects.affection, 0, 100);
+        n.stimulation = clamp(n.stimulation + effects.stimulation, 0, 100);
+        e.stress = clamp(e.stress + effects.stress, 0, 100);
+      }
+      const parsed = parseIntent(text, hint, hintWord);
+      words = applyWords(g, parsed, tone);
+      if (words.includes('cruel')) {
+        log(g, 'temper', `You told ${b.name} you hate ${b.sex === 'girl' ? 'her' : 'him'}. ${b.sex === 'girl' ? 'She' : 'He'} may not follow every word, but ${b.sex === 'girl' ? 'she' : 'he'} understands exactly what it means.`, 'danger');
+        if (!b.state.cryingSince) { b.state.cryingSince = g.sim.time; b.state.cryCause = 'scared'; b.state.cryIntensity = 0.95; g.stats.cries++; }
+        else b.state.cryIntensity = 1;
+        b.state.lastAnsweredCryAt = 0;
+      } else if (words.includes('praise')) {
+        log(g, 'coach', `You told ${b.name} you love ${b.sex === 'girl' ? 'her' : 'him'}. ${b.sex === 'girl' ? 'She' : 'He'} lights up.`, 'good');
+      }
+      if (parsed.command) {
+        outcome = resolveCommand(g, parsed, rng, applyAction);
+        if (outcome) log(g, outcome.kind === 'obeyed' ? 'chore' : 'observe', outcome.text, outcome.sev || 'info');
+      }
+      if (g.status === 'active' && g.baby.needs.health <= 0) advance(g, 1);
+    });
+    this.broadcast(entry, events);
+    await this.persist(entry, events, true);
+    return { talk, words, outcome };
   }
 
   async order(id, items) {

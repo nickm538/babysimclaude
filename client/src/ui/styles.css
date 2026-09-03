@@ -135,6 +135,11 @@ input:focus { border-color: var(--accent2); }
 .msg.parent { align-self: flex-end; background: rgba(127,200,232,0.18); border-bottom-right-radius: 4px; }
 .msg.baby { align-self: flex-start; background: rgba(255,255,255,0.07); border-bottom-left-radius: 4px; font-style: italic; }
 .msg .tone { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-top: 3px; font-style: normal; }
+/* Something the child actually did because of what you said — narration, not dialogue. */
+.msg.event { align-self: center; max-width: 92%; text-align: center; background: rgba(255,255,255,0.05); border: 1px dashed var(--line); color: var(--muted); font-size: 13px; font-style: italic; }
+.msg.event.obeyed { border-color: rgba(111,207,151,0.45); color: var(--good); }
+.msg.event.refused { border-color: rgba(242,201,76,0.4); color: var(--warn); }
+.msg.event.too_young { border-color: rgba(127,200,232,0.35); }
 .msg .tone.harsh { color: #ffb3b3; } .msg .tone.gentle { color: var(--good); }
 .chat form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); padding-bottom: calc(var(--sab) + 10px); }
 .chat .llm { font-size: 11px; color: var(--muted); padding: 6px 12px 0; }

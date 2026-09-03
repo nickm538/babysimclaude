@@ -22,13 +22,13 @@ export const TIME = {
 };
 
 export const NEED_KEYS = ['fullness', 'rest', 'diaper', 'clean', 'comfort', 'stimulation', 'affection', 'health'];
-export const EMOTION_KEYS = ['happiness', 'trust', 'security', 'stress'];
+export const EMOTION_KEYS = ['happiness', 'trust', 'security', 'esteem', 'stress'];
 export const DEV_KEYS = ['cognitive', 'motor', 'language', 'social', 'emotional'];
 
 export const NEED_LABELS = {
   fullness: 'Fed', rest: 'Rested', diaper: 'Dry diaper', clean: 'Clean', comfort: 'Comfort',
   stimulation: 'Engaged', affection: 'Loved', health: 'Health',
-  happiness: 'Happiness', trust: 'Trust', security: 'Security', stress: 'Stress',
+  happiness: 'Happiness', trust: 'Trust', security: 'Security', esteem: 'Self-esteem', stress: 'Stress',
   cognitive: 'Cognitive', motor: 'Motor', language: 'Language', social: 'Social', emotional: 'Self-regulation',
 };
 

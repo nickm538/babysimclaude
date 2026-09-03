@@ -6,6 +6,7 @@ import { moodOf } from '../sim/view.js';
 import { distressOf } from '../sim/engine.js';
 import { stageFor, ageLabel } from '../../shared/constants.js';
 import { storySummaryForLLM } from '../sim/storyChapters.js';
+import { COMMANDS } from './chatIntent.js';
 
 const MODEL = process.env.BABY_LLM_MODEL || 'claude-opus-5';
 let client = null;
@@ -65,8 +66,14 @@ const SCHEMA = {
       properties: { affection: { type: 'integer' }, stimulation: { type: 'integer' }, stress: { type: 'integer' } },
       required: ['affection', 'stimulation', 'stress'], additionalProperties: false,
     },
+    // The model reads the message for a request the pattern matcher may have missed — "could you
+    // give the plants a drink for me?" is the same ask as "water the plants". It only ever NAMES a
+    // request; whether the child understands it, is willing, and can actually do it is decided by
+    // the simulation, never by the model.
+    request: { type: 'string', enum: ['none', ...COMMANDS.map((c) => c.id)] },
+    word: { type: 'string', description: 'If request is "word", the single word the parent asked the child to say. Otherwise an empty string.' },
   },
-  required: ['tone', 'reply', 'effects'], additionalProperties: false,
+  required: ['tone', 'reply', 'effects', 'request', 'word'], additionalProperties: false,
 };
 
 export async function babyReply(game, text, history = []) {
@@ -78,7 +85,8 @@ export async function babyReply(game, text, history = []) {
       const system = `You are the simulation voice of a real baby/child in a realistic parenting game. Respond ONLY as the child would actually behave, strictly limited by developmental stage. Never break character, never explain, never be a chatbot. Preverbal babies do not understand words — they respond to tone, touch, and their own needs.
 Developmental capability: ${speechLevel(ctx.days)}
 Current state: ${ctx.summary}
-Rules: Reflect the current needs (a hungry crying newborn keeps crying no matter how sweet the words; a scared child with low trust is wary; a secure happy toddler is chatty). Harsh, shouted, or cruel parent messages frighten the child — show fear, crying, freezing, or withdrawal. Gentle talk soothes a little but does not replace feeding/changing. Keep replies under 45 words. Also classify the parent's tone: gentle, neutral, cold, or harsh. Effects are small integers from -8 to 8 describing how this exchange changed the child's affection, stimulation and stress.`;
+Rules: Reflect the current needs (a hungry crying newborn keeps crying no matter how sweet the words; a scared child with low trust is wary; a secure happy toddler is chatty). Harsh, shouted, or cruel parent messages frighten the child — show fear, crying, freezing, or withdrawal. Gentle talk soothes a little but does not replace feeding/changing. Keep replies under 45 words. Also classify the parent's tone: gentle, neutral, cold, or harsh. Effects are small integers from -8 to 8 describing how this exchange changed the child's affection, stimulation and stress.
+Requests: if the parent is asking the child to DO something, set "request" to the matching id, otherwise "none". Ids: ${COMMANDS.map((c) => c.id).join(', ')}. Only name the request — do NOT decide whether the child obeys, and do NOT describe them doing it in the reply unless they are plainly capable and willing; the simulation decides that separately and will narrate the outcome itself. Write the reply as the child's immediate reaction to being asked.`;
       const messages = [];
       for (const h of history.slice(-8)) messages.push({ role: h.role === 'baby' ? 'assistant' : 'user', content: h.content });
       messages.push({ role: 'user', content: text });
@@ -96,7 +104,8 @@ Rules: Reflect the current needs (a hungry crying newborn keeps crying no matter
         if (block) {
           const parsed = JSON.parse(block.text);
           const tone = heuristic === 'harsh' ? 'harsh' : parsed.tone;
-          return { reply: parsed.reply, tone, effects: clampEffects(parsed.effects), source: 'llm' };
+          const request = parsed.request && parsed.request !== 'none' ? parsed.request : null;
+          return { reply: parsed.reply, tone, effects: clampEffects(parsed.effects), request, word: String(parsed.word || '').slice(0, 24), source: 'llm' };
         }
       }
     } catch (e) {

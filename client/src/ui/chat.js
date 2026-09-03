@@ -21,7 +21,9 @@ export class Chat {
   render() {
     if (!this.el) return;
     const box = this.el.querySelector('#chat-msgs');
-    box.innerHTML = this.msgs.slice(-40).map((m) => `<div class="msg ${m.role}">${escapeHtml(m.content)}${m.role === 'parent' && m.tone ? `<div class="tone ${m.tone}">${m.tone}</div>` : ''}</div>`).join('') || `<div class="msg baby">${store.view?.baby.name || 'The baby'} looks at you.</div>`;
+    box.innerHTML = this.msgs.slice(-40).map((m) => (m.role === 'event'
+      ? `<div class="msg event ${escapeHtml(m.kind || '')}">${escapeHtml(m.content)}</div>`
+      : `<div class="msg ${m.role}">${escapeHtml(m.content)}${m.role === 'parent' && m.tone ? `<div class="tone ${m.tone}">${m.tone}</div>` : ''}</div>`)).join('') || `<div class="msg baby">${store.view?.baby.name || 'The baby'} looks at you.</div>`;
     if (this.busy) box.insertAdjacentHTML('beforeend', '<div class="msg baby">…</div>');
     box.scrollTop = box.scrollHeight;
   }
@@ -37,6 +39,16 @@ export class Chat {
       this.msgs.push({ role: 'baby', content: r.reply });
       if (r.game) store.setView(r.game);
       if (r.tone === 'harsh') store.toast('That was harsh. Trust and happiness took a hit.', 'danger');
+      // What the words themselves did, and whether a request was actually carried out. These are
+      // shown in the thread rather than as toasts, because they are part of the conversation.
+      const words = Array.isArray(r.words) ? r.words : [];
+      if (words.includes('cruel')) store.toast(`${store.view.baby.name} understood that. Self-esteem and trust dropped hard.`, 'danger', 8000);
+      else if (words.includes('praise')) store.toast('Praise lands. Self-esteem up.', 'good');
+      else if (words.includes('repair')) store.toast('Apologising after losing your temper genuinely helps.', 'good', 6000);
+      if (r.outcome && r.outcome.text) {
+        this.msgs.push({ role: 'event', content: r.outcome.text, kind: r.outcome.kind });
+        if (r.outcome.kind === 'obeyed') this.ctx.onDid?.(r.outcome);
+      }
       this.ctx.onReply?.(r.reply, r.tone);
     } catch (e) { this.msgs.push({ role: 'baby', content: `(${e.message})` }); }
     this.busy = false; this.render();

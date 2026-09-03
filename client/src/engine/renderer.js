@@ -3,6 +3,7 @@
 // numbers are exposed on `this.daylight` for the outdoors, effects and art modules.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { PostFX } from './post.js';
 
 const TUNGSTEN = new THREE.Color(0xffc98a), DAY_SKY = new THREE.Color(0xbcd6ff);
 
@@ -27,6 +28,15 @@ export class Renderer {
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     this.scene.environmentIntensity = 0.55;
     this.buildLights();
+    // The player can force post-processing off (Settings, or ?post=0 for a device that hates it).
+    const pref = (() => {
+      try {
+        if (new URLSearchParams(location.search).get('post') === '0') return 'off';
+        return localStorage.getItem('cradle.post') || 'auto';
+      } catch { return 'auto'; }
+    })();
+    this.postPref = pref;
+    this.post = pref === 'off' ? null : new PostFX(this.renderer, this.scene, this.camera, { mobile: isMobile });
     this.clock = new THREE.Clock();
     this.onFrame = [];
     this.daylight = { elev: 0.5, az: 0, up: true, warm: 0, hour: 12, night: false, lightsOn: 0, sunDir: new THREE.Vector3(0, 1, 0), sunColor: new THREE.Color(0xfff1dc), skyTop: new THREE.Color(0x5f9be6), skyHorizon: new THREE.Color(0xcfe3ff), season: 'autumn' };
@@ -42,10 +52,16 @@ export class Renderer {
     this.sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
     this.sun.position.set(6, 8, -4);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(this.isMobile ? 1024 : 2048, this.isMobile ? 1024 : 2048);
-    this.sun.shadow.camera.near = 1; this.sun.shadow.camera.far = 40;
-    this.sun.shadow.camera.left = -9; this.sun.shadow.camera.right = 9; this.sun.shadow.camera.top = 9; this.sun.shadow.camera.bottom = -9;
-    this.sun.shadow.bias = -0.0005; this.sun.shadow.normalBias = 0.015; this.sun.shadow.radius = 3;
+    this.sun.shadow.mapSize.set(this.isMobile ? 2048 : 4096, this.isMobile ? 2048 : 4096);
+    this.sun.shadow.camera.near = 2; this.sun.shadow.camera.far = 34;
+    // Fit the frustum to the room the player is actually in, not to a generous box around it. The
+    // old 18m span spent most of its texels on empty space outside the walls; 7.5m over 4096 is
+    // about 1.8mm per texel, which is the difference between a crib rail casting a bar of shadow and
+    // casting a grey smear.
+    const span = 7.5;
+    this.sun.shadow.camera.left = -span; this.sun.shadow.camera.right = span;
+    this.sun.shadow.camera.top = span; this.sun.shadow.camera.bottom = -span;
+    this.sun.shadow.bias = -0.00025; this.sun.shadow.normalBias = 0.008; this.sun.shadow.radius = 2;
     s.add(this.sun); s.add(this.sun.target);
     this.sun.target.position.set(1, 0, -1);
     // ceiling fixtures (warm tungsten) — the nursery one casts a soft shadow so the crib mobile reads on the sheet
@@ -53,7 +69,7 @@ export class Renderer {
     for (const [x, z, shadow] of [[0.5, 0.5, false], [-4, -2.5, false], [4.2, -2.6, !this.isMobile], [-3, 3, false]]) {
       const l = new THREE.PointLight(TUNGSTEN, 0, 12, 2);
       l.position.set(x, 2.65, z); s.add(l); this.ceiling.push(l);
-      if (shadow) { l.castShadow = true; l.shadow.mapSize.set(512, 512); l.shadow.bias = -0.004; l.shadow.radius = 4; l.shadow.camera.near = 0.3; l.shadow.camera.far = 8; }
+      if (shadow) { l.castShadow = true; l.shadow.mapSize.set(this.isMobile ? 512 : 1024, this.isMobile ? 512 : 1024); l.shadow.bias = -0.002; l.shadow.normalBias = 0.01; l.shadow.radius = 3; l.shadow.camera.near = 0.3; l.shadow.camera.far = 8; }
     }
     this.lamp = new THREE.PointLight(0xffb86b, 0, 6, 2);
     this.lamp.position.set(2.2, 1.45, 3.6); s.add(this.lamp);
@@ -114,13 +130,36 @@ export class Renderer {
     this.camera.aspect = w / h;
     this.camera.fov = w < h ? 78 : 68;
     this.camera.updateProjectionMatrix();
+    this.post?.setSize(w, h);
+  }
+
+  // Adaptive quality. A composited frame is worth having only if the device can actually draw one in
+  // time; on anything that cannot, ambient occlusion goes first and the whole chain second. Measured
+  // over a rolling second so a single stall (a mesh rebuild, a tab regaining focus) never demotes.
+  tuneQuality(dtRaw) {
+    const q = this.q || (this.q = { acc: 0, frames: 0, level: 2, settle: 1.2 });
+    if (q.settle > 0) { q.settle -= dtRaw; return; }   // ignore the first moments: shaders are still compiling
+    q.acc += dtRaw; q.frames++;
+    if (q.acc < 1) return;
+    const avg = q.acc / q.frames;
+    q.acc = 0; q.frames = 0;
+    if (avg > 0.055 && q.level === 2 && this.post?.enabled) {
+      q.level = 1; this.post.setAO(false);
+      console.warn(`[post] ambient occlusion off — ${(avg * 1000).toFixed(0)}ms frames`);
+    } else if (avg > 0.075 && q.level === 1) {
+      q.level = 0; this.post?.dispose();
+      console.warn(`[post] post-processing off — ${(avg * 1000).toFixed(0)}ms frames`);
+      if (this.renderer.getPixelRatio() > 1) this.renderer.setPixelRatio(1);
+    }
   }
 
   start() {
     const loop = () => {
-      const dt = Math.min(0.05, this.clock.getDelta());
+      const raw = this.clock.getDelta();
+      const dt = Math.min(0.05, raw);
       for (const fn of this.onFrame) fn(dt);
-      this.renderer.render(this.scene, this.camera);
+      if (!this.post?.render()) this.renderer.render(this.scene, this.camera);
+      this.tuneQuality(Math.min(0.5, raw));
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);

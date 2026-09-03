@@ -1,8 +1,20 @@
 // Face rig attached to the head bone: eyes with iris/pupil, eyelids that blink and squint, brows, ears,
 // mouth cavity/tongue/lips (revealed by the cry/open morphs) and instanced hair strands.
 import * as THREE from 'three';
+import { skinMicroTexture } from '../engine/textures.js';
 
-function irisTexture(color) {
+// Hair is not a matte solid: the highlight runs along the strand, not across it, and shifts as the
+// head turns. Anisotropy is that behaviour. Shared by scalp hair, brows and lashes so they match.
+export function hairMaterial(color, roughness = 0.5) {
+  return new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(color), roughness, metalness: 0.02,
+    anisotropy: 0.7, anisotropyRotation: Math.PI / 2,
+    sheen: 0.25, sheenRoughness: 0.5, sheenColor: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.4),
+    envMapIntensity: 0.6,
+  });
+}
+
+export function irisTexture(color) {
   const c = document.createElement('canvas'); c.width = c.height = 256; const ctx = c.getContext('2d');
   const g = ctx.createRadialGradient(128, 128, 20, 128, 128, 128);
   const col = new THREE.Color(color), light = col.clone().lerp(new THREE.Color(0xffffff), 0.35), dark = col.clone().multiplyScalar(0.35);
@@ -26,29 +38,34 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
   const F = { group: face, eyes: [], lids: [], brows: [], gaze: new THREE.Vector3(0, 0, 1), blink: 0, squint: 0, browRaise: 0, browFurrow: 0 };
 
   const eyeR = R * 0.165;
-  const scleraMat = new THREE.MeshPhysicalMaterial({ color: 0xf4f6fa, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 0.8 });
-  const irisMat = new THREE.MeshStandardMaterial({ map: irisTexture(appearance.eyeColor || '#4a3020'), roughness: 0.35 });
-  const mobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-  const corneaMat = mobile ? new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0, transparent: true, opacity: 0.25, clearcoat: 1, envMapIntensity: 1.2 }) : new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, roughness: 0, thickness: 0.002, transparent: true, opacity: 0.55, ior: 1.38, envMapIntensity: 1.2 });
+  // The eye is one solid object. A see-through cornea sphere over an iris reads as a glass marble
+  // with something floating inside it; a real eye is an opaque ball with a wet film on top, and the
+  // corneal bulge is a shape, not a transparency. So: an opaque sclera with a clearcoat for the tear
+  // film, an opaque painted iris cap, and the bulge done by scaling the cap forward.
+  const scleraMat = new THREE.MeshPhysicalMaterial({
+    color: 0xf3f4f6, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 0.9,
+    sheen: 0.15, sheenColor: new THREE.Color(0xffd9d0), // the faint pink of the vessels at the edges
+  });
+  const irisMat = new THREE.MeshPhysicalMaterial({ map: irisTexture(appearance.eyeColor || '#4a3020'), roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.1 });
   for (const sx of [-1, 1]) {
     const socket = new THREE.Group();
     socket.position.copy(onSurface(V(sx * 0.42, 0.05, 1), -eyeR * 0.62));
     const eye = new THREE.Group();
     const ball = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 32, 24), scleraMat); ball.castShadow = false; eye.add(ball);
-    const iris = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 1.01, 32, 16, 0, Math.PI * 2, 0, 0.62), irisMat); iris.rotation.x = Math.PI / 2; eye.add(iris);
-    const cornea = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 1.06, 24, 12, 0, Math.PI * 2, 0, 0.7), corneaMat); cornea.rotation.x = Math.PI / 2; cornea.scale.z = 1.15; eye.add(cornea);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 1.012, 32, 16, 0, Math.PI * 2, 0, 0.62), irisMat);
+    iris.rotation.x = Math.PI / 2; iris.scale.z = 1.12; eye.add(iris);
     socket.add(eye);
     // lids: sphere caps slightly larger than the eye, skin material; upper rotates down to blink
     const lidGeo = new THREE.SphereGeometry(eyeR * 1.16, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.5);
     const upper = new THREE.Mesh(lidGeo, skinMat); upper.rotation.x = -0.35; upper.scale.set(1.05, 1, 1.05); socket.add(upper);
     const lower = new THREE.Mesh(lidGeo, skinMat); lower.rotation.x = Math.PI + 0.42; lower.scale.set(1.05, 1, 1.05); socket.add(lower);
     // lashes: thin dark torus arc on the upper lid edge
-    const lash = new THREE.Mesh(new THREE.TorusGeometry(eyeR * 1.12, eyeR * 0.045, 6, 24, Math.PI * 0.95), new THREE.MeshStandardMaterial({ color: 0x2a1a12, roughness: 0.9 }));
+    const lash = new THREE.Mesh(new THREE.TorusGeometry(eyeR * 1.12, eyeR * 0.045, 6, 24, Math.PI * 0.95), hairMaterial('#2a1a12', 0.85));
     lash.position.y = eyeR * 0.15; lash.rotation.set(Math.PI * 0.62, 0, Math.PI * 0.03); upper.add(lash);
     face.add(socket);
     F.eyes.push({ socket, eye, upper, lower, sx });
     // brow
-    const brow = new THREE.Mesh(new THREE.TorusGeometry(R * 0.2, R * 0.028, 8, 20, Math.PI * 0.8), new THREE.MeshStandardMaterial({ color: appearance.hairColor || '#4a2f1d', roughness: 0.95 }));
+    const brow = new THREE.Mesh(new THREE.TorusGeometry(R * 0.2, R * 0.028, 8, 20, Math.PI * 0.8), hairMaterial(appearance.hairColor || '#4a2f1d', 0.9));
     brow.position.copy(onSurface(V(sx * 0.42, 0.34, 1), R * 0.01));
     brow.rotation.set(0.3, 0, Math.PI * 0.1 + sx * 0.05); brow.scale.set(1, 0.6, 0.35);
     face.add(brow); F.brows.push({ mesh: brow, sx, y0: brow.position.y, rz0: brow.rotation.z });
@@ -65,7 +82,12 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
   cavity.position.copy(mouthPos); cavity.scale.set(1.2, 0.8, 0.9); face.add(cavity);
   const tongue = new THREE.Mesh(new THREE.SphereGeometry(R * 0.12, 16, 12), new THREE.MeshStandardMaterial({ color: 0xd76a72, roughness: 0.45, clearcoat: 0.4 }));
   tongue.position.set(mouthPos.x, mouthPos.y - R * 0.06, mouthPos.z - R * 0.02); tongue.scale.set(1.1, 0.5, 1.2); face.add(tongue);
-  const lipMat = new THREE.MeshPhysicalMaterial({ color: new THREE.Color(appearance.skinTone || '#f0c9ae').lerp(new THREE.Color(0xd66c68), 0.55), roughness: 0.42, clearcoat: 0.5, clearcoatRoughness: 0.35 });
+  const lipMat = new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(appearance.skinTone || '#f0c9ae').lerp(new THREE.Color(0xd66c68), 0.55),
+    roughness: 0.38, clearcoat: 0.55, clearcoatRoughness: 0.3,
+    sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xff9a8a), // lips scatter red at the rim
+    normalMap: skinMicroTexture().normalMap || skinMicroTexture().map, normalScale: new THREE.Vector2(0.35, 0.35),
+  });
   const upperLip = new THREE.Mesh(new THREE.TorusGeometry(R * 0.2, R * 0.045, 10, 26, Math.PI), lipMat);
   upperLip.position.copy(mouthSurf).add(V(0, R * 0.03, R * 0.01)); upperLip.rotation.set(-0.4, 0, 0); upperLip.scale.set(1, 0.5, 0.7); face.add(upperLip);
   const lowerLip = new THREE.Mesh(new THREE.TorusGeometry(R * 0.19, R * 0.05, 10, 26, Math.PI), lipMat);
@@ -80,13 +102,13 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
 
   // hair: instanced tapered strands on the scalp; amount and length grow with age
   const amount = Math.max(0.05, Math.min(1, Number(appearance.hairAmount ?? 0.5) || 0.5));
-  const count = Math.floor(120 + amount * 900 + Math.min(1, days / 700) * 2400);
+  const count = Math.floor(200 + amount * 1500 + Math.min(1, days / 700) * 3600);
   const len = R * (0.09 + amount * 0.1 + Math.min(1, days / 900) * 0.4);
   const strandGeo = new THREE.CylinderGeometry(R * 0.002, R * 0.008, len, 5, 3);
   strandGeo.translate(0, len / 2, 0);
   // bend strands
   const sp = strandGeo.attributes.position; for (let i = 0; i < sp.count; i++) { const y = sp.getY(i); sp.setZ(i, sp.getZ(i) + (y / len) * (y / len) * len * 0.6); }
-  const hairMat = new THREE.MeshStandardMaterial({ color: appearance.hairColor || '#3b2417', roughness: 0.55, metalness: 0.05 });
+  const hairMat = hairMaterial(appearance.hairColor || '#3b2417', 0.5);
   const hair = new THREE.InstancedMesh(strandGeo, hairMat, count);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), nrm = new THREE.Vector3(), col = new THREE.Color();
   let placed = 0, tries = 0;

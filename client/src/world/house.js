@@ -1,6 +1,6 @@
 // The home: open-plan ground floor with living room, nursery nook, kitchen corner, stairs and front door.
 import * as THREE from 'three';
-import { woodTexture, plasterTexture, tileTexture, wallpaperTexture, stdMaterial } from '../engine/textures.js';
+import { woodTexture, plasterTexture, tileTexture, wallpaperTexture, stdMaterial, matte } from '../engine/textures.js';
 import { buildFurniture } from './furniture.js';
 
 export const SPOTS = {
@@ -30,7 +30,8 @@ export function buildHouse(scene, opts = {}) {
   const kitchenFloor = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 5), stdMaterial(tileTexture({ repeat: 5 }), { roughness: 0.35 }));
   kitchenFloor.rotation.x = -Math.PI / 2; kitchenFloor.position.set(-4.2, 0.005, -2.5); kitchenFloor.receiveShadow = true; g.add(kitchenFloor);
 
-  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.95 }));
+  // A ceiling is plaster too — the one flat white plane in the room was the giveaway that it was a render.
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D), stdMaterial(plasterTexture({ color: '#f4f1ea', repeat: 5, seed: 12 }), { roughness: 0.95, normalScale: new THREE.Vector2(0.35, 0.35) }));
   ceiling.rotation.x = Math.PI / 2; ceiling.position.y = H; g.add(ceiling);
 
   const wallMat = stdMaterial(plasterTexture({ color: '#e6dfd3', repeat: 4 }), { roughness: 0.92 });
@@ -59,14 +60,44 @@ export function buildHouse(scene, opts = {}) {
   wall(2.4, 0.5, -4.2, 0.15, 1.0, 1.6, nurseryMat);
   colliders.push({ min: { x: 2.3, z: -5 }, max: { x: 2.5, z: -3.4 } });
 
-  // baseboards
-  const bbMat = new THREE.MeshStandardMaterial({ color: 0xf6f3ee, roughness: 0.6 });
-  for (const [x, z, w, d] of [[0, -4.9, 12, 0.06], [0, 4.9, 12, 0.06], [-5.9, 0, 0.06, 10], [5.9, 0, 0.06, 10]]) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), bbMat); m.position.set(x, 0.06, z); g.add(m); }
+  // Profiled trim. A flat strip at the foot of a wall is a painted line; a real skirting has an ogee
+  // that catches a highlight along its top edge and throws a shadow under its lip, and coving does
+  // the same where the wall turns into the ceiling. This is most of what makes a room read as built
+  // rather than as a box with textures on it.
+  const trimMat = matte({ color: 0xf8f6f1, roughness: 0.45 });
+  const trimProfile = (pts) => { const sh = new THREE.Shape(); sh.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]); sh.closePath(); return sh; };
+  // skirting seen end-on: flat against the wall, stepping out and rolling over at the top
+  const skirtShape = trimProfile([[0, 0], [0.028, 0], [0.028, 0.10], [0.020, 0.125], [0.020, 0.15], [0.006, 0.165], [0, 0.165]]);
+  // coving: a concave sweep from wall to ceiling
+  const coveShape = trimProfile([[0, 0], [0, -0.085], [0.012, -0.082], [0.03, -0.062], [0.048, -0.03], [0.055, 0]]);
+  const runTrim = (shape, len, x, y, z, rotY) => {
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: len, bevelEnabled: false, curveSegments: 2 });
+    geo.rotateY(Math.PI / 2); geo.translate(0, 0, -len / 2);
+    const m = new THREE.Mesh(geo, trimMat);
+    m.position.set(x, y, z); m.rotation.y = rotY;
+    m.castShadow = true; m.receiveShadow = true;
+    g.add(m); return m;
+  };
+  //          length  x      y            z      facing
+  for (const [len, x, z, rotY] of [
+    [W, 0, -4.9, 0],            // north
+    [W, 0, 4.9, Math.PI],       // south
+    [D, -5.9, 0, Math.PI / 2],  // west
+    [D, 5.9, 0, -Math.PI / 2],  // east
+  ]) {
+    runTrim(skirtShape, len, x, 0, z, rotY);
+    runTrim(coveShape, len, x, H, z, rotY);
+  }
 
   // windows: glass + frames + outside sky plane
   const mobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-  const glassMat = mobile ? new THREE.MeshPhysicalMaterial({ color: 0xdfeeff, roughness: 0.05, transparent: true, opacity: 0.22, metalness: 0.1 }) : new THREE.MeshPhysicalMaterial({ color: 0xdfeeff, transmission: 0.92, roughness: 0.05, thickness: 0.01, transparent: true, opacity: 0.35, ior: 1.45 });
-  const frameMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+  // Window glass is the one legitimately see-through surface in the house, and it is done one way, not
+  // two: transmission alone on hardware that can render it (opacity on top of transmission made the
+  // pane look doubly ghosted), and a reflective, faintly tinted pane on mobile.
+  const glassMat = mobile
+    ? new THREE.MeshPhysicalMaterial({ color: 0xcfe2f3, roughness: 0.04, metalness: 0.0, transparent: true, opacity: 0.35, envMapIntensity: 1.6, clearcoat: 1 })
+    : new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 0.96, roughness: 0.04, thickness: 0.006, ior: 1.5, envMapIntensity: 1.2 });
+  const frameMat = matte({ color: 0xffffff, roughness: 0.5 });
   const mkWindow = (cx, cy, cz, w, h, rotY) => {
     const grp = new THREE.Group(); grp.position.set(cx, cy, cz); grp.rotation.y = rotY;
     const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h), glassMat); grp.add(glass);
@@ -76,7 +107,7 @@ export function buildHouse(scene, opts = {}) {
     // sky card behind
     const sky = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.6, h * 1.6), new THREE.MeshBasicMaterial({ color: 0x9fc7ee, toneMapped: true })); sky.position.z = -0.6; grp.add(sky); grp.userData.sky = sky;
     // curtains
-    const curtMat = new THREE.MeshStandardMaterial({ color: 0xd8c3a5, roughness: 1, side: THREE.DoubleSide });
+    const curtMat = matte({ color: 0xd8c3a5, roughness: 1, side: THREE.DoubleSide });
     for (const sx of [-1, 1]) { const c = new THREE.Mesh(new THREE.PlaneGeometry(0.45, h + 0.5, 6, 1), curtMat); const p = c.geometry.attributes.position; for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin(p.getX(i) * 30) * 0.05); c.geometry.computeVertexNormals(); c.position.set(sx * (w / 2 + 0.15), 0.1, 0.12); grp.add(c); }
     g.add(grp); return grp;
   };
@@ -86,26 +117,26 @@ export function buildHouse(scene, opts = {}) {
   const doorGrp = new THREE.Group(); doorGrp.position.set(-1.5, 0, 4.9);
   const door = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 0.08), stdMaterial(woodTexture({ base: '#4d3324', dark: '#2b1a10', repeat: 1, planks: 1, seed: 5 }), { roughness: 0.6 }));
   door.position.y = 1.1; door.castShadow = true; doorGrp.add(door);
-  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 12), new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.9, roughness: 0.25 })); knob.position.set(0.45, 1.05, -0.06); doorGrp.add(knob);
-  const mat = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.02, 0.6), new THREE.MeshStandardMaterial({ color: 0x5a4a3a, roughness: 1 })); mat.position.set(0, 0.01, -0.5); doorGrp.add(mat);
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 12), matte({ color: 0xd4af37, metalness: 0.9, roughness: 0.25 })); knob.position.set(0.45, 1.05, -0.06); doorGrp.add(knob);
+  const mat = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.02, 0.6), matte({ color: 0x5a4a3a, roughness: 1 })); mat.position.set(0, 0.01, -0.5); doorGrp.add(mat);
   door.userData.interact = { id: 'door', label: 'Front door' }; interactables.push(door);
   g.add(doorGrp);
   colliders.push({ min: { x: -6, z: 4.8 }, max: { x: 6, z: 5 } }, { min: { x: -6, z: -5 }, max: { x: 6, z: -4.8 } }, { min: { x: -6, z: -5 }, max: { x: -5.8, z: 5 } }, { min: { x: 5.8, z: -5 }, max: { x: 6, z: 5 } });
 
   // thermostat on the wall
-  const thermo = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 24), new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4 }));
+  const thermo = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 24), matte({ color: 0xf0f0f0, roughness: 0.4 }));
   thermo.rotation.x = Math.PI / 2; thermo.position.set(0.25, 1.5, -4.88); thermo.userData.interact = { id: 'thermostat', label: 'Thermostat' }; interactables.push(thermo); g.add(thermo);
 
   // stairs along west wall from z=0.5 to z=3.5 going up
   const stairMat = stdMaterial(woodTexture({ base: '#9a6b45', dark: '#5e3d24', repeat: 1, planks: 1, seed: 8 }), { roughness: 0.55 });
   const stairs = new THREE.Group();
   for (let i = 0; i < 12; i++) { const s = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.18, 0.28), stairMat); s.position.set(-5.4, 0.09 + i * 0.18, 0.7 + i * 0.28); s.castShadow = s.receiveShadow = true; stairs.add(s); }
-  const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.9, 3.4), new THREE.MeshStandardMaterial({ color: 0xf8f6f2, roughness: 0.5 })); rail.position.set(-4.88, 1.6, 2.2); rail.rotation.x = -0.55; stairs.add(rail);
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.9, 3.4), matte({ color: 0xf8f6f2, roughness: 0.5 })); rail.position.set(-4.88, 1.6, 2.2); rail.rotation.x = -0.55; stairs.add(rail);
   stairs.userData.interact = { id: 'stairs', label: 'Stairs' }; interactables.push(stairs); g.add(stairs);
   colliders.push({ min: { x: -6, z: 0.5 }, max: { x: -4.85, z: 4 } });
   const gate = new THREE.Group(); gate.position.set(-5.4, 0, 0.45); gate.visible = false;
-  for (let i = 0; i < 9; i++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.75, 8), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })); b.position.set(-0.48 + i * 0.12, 0.38, 0); gate.add(b); }
-  const gtop = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.04, 0.03), new THREE.MeshStandardMaterial({ color: 0xffffff })); gtop.position.y = 0.75; gate.add(gtop);
+  for (let i = 0; i < 9; i++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.75, 8), matte({ color: 0xffffff, roughness: 0.4 })); b.position.set(-0.48 + i * 0.12, 0.38, 0); gate.add(b); }
+  const gtop = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.04, 0.03), matte({ color: 0xffffff })); gtop.position.y = 0.75; gate.add(gtop);
   g.add(gate);
 
   const furniture = buildFurniture(g, colliders, interactables, opts);

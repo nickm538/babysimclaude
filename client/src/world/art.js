@@ -3,9 +3,9 @@
 // whose frames appear as memories accumulate. Everything is seeded from the baby's name, so each game
 // gets its own gallery. No external assets — all canvas paths and per-pixel maths.
 import * as THREE from 'three';
-import { canvas, mulberry32, hashString, fbm, toTexture } from '../engine/textures.js';
+import { canvas, mulberry32, hashString, fbm, toTexture, matte } from '../engine/textures.js';
 
-const FRAME_W = new THREE.MeshStandardMaterial({ color: 0xf3efe7, roughness: 0.5 });
+const FRAME_W = matte({ color: 0xf3efe7, roughness: 0.5 });
 
 function texFromCanvas(c) { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; }
 
