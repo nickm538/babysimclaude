@@ -42,13 +42,14 @@ export class Baby {
     // smaller than a finger. Full fat on a GPU, reduced on mobile, minimal on a software rasteriser.
     const res = this.lowSpec ? 56 : /iPhone|iPad|Android/i.test(navigator.userAgent) ? 76 : 96;
     const built = buildBabyBody({ days: Math.max(0, days), skinMat: this.mats.skin, clothMat: this.mats.cloth, diaperMat: this.mats.diaper, res });
-    this.body = built.body; this.onesie = built.onesie; this.diaper = built.diaper; this.layout = built.layout; this.bones = built.bones; this.morphNames = built.morphNames;
+    this.body = built.body; this.onesie = built.onesie; this.diaper = built.diaper; this.layout = built.layout; this.bones = built.bones; this.morphNames = built.morphNames; this.garmentTris = built.garmentTris;
     this.body.add(this.onesie); this.body.add(this.diaper);
     this.rig.add(this.body);
     this.face = buildFace({ headBone: this.bones.head, layout: this.layout, skinMat: this.mats.skin, appearance: b.appearance, days, surface: built.surface });
     if (this.helper) { this.scene.remove(this.helper); this.helper = null; }
     this.anim = new BabyAnimator(this.bones);
     this.mats.skin.userData.uniforms.uHeadY.value = this.layout.headCenter.y;
+    this.mats.skin.userData.uniforms.uHeadR.value = this.layout.P.headR;
     this.gazePoint = new THREE.Vector3();
   }
 

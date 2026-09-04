@@ -28,14 +28,18 @@ export function makeSkinMaterial({ skinTone = '#f0c9ae', sss = 0.55, blush = 0.3
     uBlush: { value: blush },
     uBlushColor: { value: new THREE.Color(0xe8746a) },
     uTime: { value: 0 },
-    uHeadY: { value: 0.5 }, // in local model space: height of eyes to place cheeks
+    uHeadY: { value: 0.5 },  // in local model space: height of the eyes, to place the cheeks
+    uHeadR: { value: 0.1 },  // head radius in the same space: every facial zone is sized from it
     uSick: { value: 0 }, // 0..1 pallor / yellow tint (jaundice) blend
     uJaundice: { value: 0 },
     uFlush: { value: 0 }, // crying flush 0..1
     uDetail: { value: skinDetailTexture().normalMap || skinDetailTexture().map },
     uMicro: { value: skinMicroTexture().normalMap || skinMicroTexture().map },
-    uDetailScale: { value: 0.5 },   // fold/crease scale
-    uMicroScale: { value: 0.75 },   // pore/follicle scale
+    // These are detail normals: they exist to break up a highlight, not to reshape the surface. At
+    // the strengths they used to carry they swung the shading normal by tens of degrees, which on a
+    // face read as blotchy mauve shading and a red scattering streak along every triplanar seam.
+    uDetailScale: { value: 0.22 },  // fold/crease scale
+    uMicroScale: { value: 0.12 },   // pore/follicle scale
     uCurvature: { value: 1.0 },
   };
   mat.onBeforeCompile = (shader) => {
@@ -52,11 +56,14 @@ varying vec3 vLocalPos;
 varying vec3 vLocalNormal;
 varying mat3 vObjToView;
 uniform float uSSS; uniform vec3 uSSSColor; uniform float uBlush; uniform vec3 uBlushColor; uniform float uTime; uniform float uHeadY; uniform float uSick; uniform float uJaundice; uniform float uFlush;
-uniform sampler2D uDetail; uniform sampler2D uMicro; uniform float uDetailScale; uniform float uMicroScale; uniform float uCurvature;
+uniform sampler2D uDetail; uniform sampler2D uMicro; uniform float uDetailScale; uniform float uMicroScale; uniform float uCurvature; uniform float uHeadR;
 float gauss(float d, float s){ return exp(-d*d/(2.0*s*s)); }
 // Triplanar tangent-space normal, blended into the geometric normal (UDN-style: cheap and stable).
 vec3 triplanarNormal(sampler2D tex, vec3 p, vec3 n, float scale, float strength) {
-  vec3 w = pow(abs(n), vec3(4.0));
+  // A gentler blend exponent. At 4.0 the three projections hand over inside a narrow band, and a
+  // strong perturbation turns those bands into visible low-frequency streaks across a curved surface
+  // — most obviously down the side of a face, which is the one place they must not show.
+  vec3 w = pow(abs(n), vec3(3.0));
   w /= max(1e-4, w.x + w.y + w.z);
   vec3 nx = texture2D(tex, p.zy * scale).xyz * 2.0 - 1.0;
   vec3 ny = texture2D(tex, p.xz * scale).xyz * 2.0 - 1.0;
@@ -72,15 +79,18 @@ vec3 triplanarNormal(sampler2D tex, vec3 p, vec3 n, float scale, float strength)
       .replace('#include <color_fragment>', `#include <color_fragment>
 {
   vec3 p = vLocalPos;
-  // cheeks: two blobs either side of the face, slightly below eye line, front-facing
-  float cheekL = gauss(length(p - vec3(-0.075, uHeadY - 0.045, 0.085)), 0.045);
-  float cheekR = gauss(length(p - vec3( 0.075, uHeadY - 0.045, 0.085)), 0.045);
-  float nose = gauss(length(p - vec3(0.0, uHeadY - 0.02, 0.12)), 0.02) * 0.6;
-  float chin = gauss(length(p - vec3(0.0, uHeadY - 0.11, 0.09)), 0.03) * 0.4;
+  // Blush zones are measured in head radii, not metres. Written as absolute distances they were sized
+  // for a newborn skull and, on anything bigger, two cheek blobs with a 45 mm sigma overlapped across
+  // the entire face and painted it flat salmon — the opposite of blush, which is local by definition.
+  float R = max(0.02, uHeadR);
+  float cheekL = gauss(length(p - vec3(-0.58 * R, uHeadY - 0.34 * R, 0.72 * R)), 0.26 * R);
+  float cheekR = gauss(length(p - vec3( 0.58 * R, uHeadY - 0.34 * R, 0.72 * R)), 0.26 * R);
+  float nose = gauss(length(p - vec3(0.0, uHeadY - 0.16 * R, 1.02 * R)), 0.15 * R) * 0.6;
+  float chin = gauss(length(p - vec3(0.0, uHeadY - 0.86 * R, 0.72 * R)), 0.2 * R) * 0.4;
   float lowBody = smoothstep(0.55, 0.0, p.y) * 0.18; // knees/feet a little pinker
   float redness = (cheekL + cheekR) * (uBlush + uFlush * 0.9) + nose * (0.4 + uFlush) + chin * 0.3 + lowBody;
   redness = clamp(redness, 0.0, 1.0);
-  diffuseColor.rgb = mix(diffuseColor.rgb, uBlushColor, redness * 0.55);
+  diffuseColor.rgb = mix(diffuseColor.rgb, uBlushColor, redness * 0.42);
   // creases are darker/warmer: use normal facing away from body axis as proxy is expensive; keep subtle noise via time-free hash
   float pale = uSick;
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.84, 0.82) * diffuseColor.rgb + 0.08, pale * 0.5);
@@ -110,16 +120,35 @@ vec3 triplanarNormal(sampler2D tex, vec3 p, vec3 n, float scale, float strength)
   // is thin — fingertips, ears, the rim of a nostril, the bridge of a nose held against a window.
   // Flat expanses like a back or a thigh scatter far less. Without this the whole body glows evenly,
   // which is the tell-tale look of a wax model.
-  float curv = clamp(length(fwidth(n)) / max(1e-4, length(fwidth(vViewPosition))) * 0.06, 0.0, 1.0);
-  float thin = mix(0.55, 1.6, curv) * uCurvature;
+  // The curvature estimate is a screen-space derivative, so anything that makes the shading normal
+  // noisy — a detail map, a coarse mesh, a silhouette — reads as infinite curvature. Cap it well
+  // below 1 so a bad estimate can never drive scattering to maximum.
+  float curv = clamp(length(fwidth(n)) / max(1e-4, length(fwidth(vViewPosition))) * 0.06, 0.0, 0.75);
+  float thin = mix(0.5, 1.15, curv) * uCurvature;
   // approximate subsurface: light wrapping + rim scatter tinted red
+  // Scattering has to be shadowed like everything else. three applies each light's shadow inside its
+  // own light loop, so a term added afterwards from the raw light colour keeps scattering at full
+  // strength through shadow — which painted a solid red patch down the shadowed half of every face.
+  // The unrolled-loop pragma is what gives a literal index for the shadow map array, exactly as
+  // three's own lighting does it.
   #if NUM_DIR_LIGHTS > 0
-  for (int i = 0; i < NUM_DIR_LIGHTS; i++) {
-    vec3 l = directionalLights[i].direction;
-    float wrap = clamp((dot(n, l) + 0.55) / 1.55, 0.0, 1.0);
-    float back = pow(clamp(dot(v, -l + n * 0.3), 0.0, 1.0), 2.5);
-    reflectedLight.directDiffuse += directionalLights[i].color * uSSSColor * (wrap * 0.06 + back * 0.12 * thin + fres * 0.05 * thin) * uSSS * diffuseColor.rgb;
+  // The unrolled body is spliced in without a scope of its own, so every local here is declared once,
+  // outside the loop — the same shape three uses for its own light loops.
+  DirectionalLight cradleLight;
+  float cradleShadow; vec3 cradleL; float cradleWrap; float cradleBack;
+  #pragma unroll_loop_start
+  for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {
+    cradleLight = directionalLights[ i ];
+    cradleShadow = 1.0;
+    #if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )
+    cradleShadow = receiveShadow ? getShadow( directionalShadowMap[ i ], directionalLightShadows[ i ].shadowMapSize, directionalLightShadows[ i ].shadowIntensity, directionalLightShadows[ i ].shadowBias, directionalLightShadows[ i ].shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;
+    #endif
+    cradleL = cradleLight.direction;
+    cradleWrap = clamp((dot(n, cradleL) + 0.55) / 1.55, 0.0, 1.0);
+    cradleBack = pow(clamp(dot(v, -cradleL + n * 0.3), 0.0, 1.0), 2.5);
+    reflectedLight.directDiffuse += cradleLight.color * cradleShadow * uSSSColor * (cradleWrap * 0.045 + cradleBack * 0.09 * thin + fres * 0.035 * thin) * uSSS * diffuseColor.rgb;
   }
+  #pragma unroll_loop_end
   #endif
   #if NUM_POINT_LIGHTS > 0
   for (int i = 0; i < NUM_POINT_LIGHTS; i++) {
@@ -131,17 +160,18 @@ vec3 triplanarNormal(sampler2D tex, vec3 p, vec3 n, float scale, float strength)
     reflectedLight.directDiffuse += pointLights[i].color * uSSSColor * wrap * 0.05 * att * thin * uSSS * diffuseColor.rgb;
   }
   #endif
-  reflectedLight.indirectDiffuse += uSSSColor * fres * 0.06 * thin * uSSS * diffuseColor.rgb;
+  reflectedLight.indirectDiffuse += uSSSColor * fres * 0.04 * thin * uSSS * diffuseColor.rgb;
 }`);
   };
-  mat.customProgramCacheKey = () => 'cradle-skin-v3';
+  mat.customProgramCacheKey = () => 'cradle-skin-v7';
   return mat;
 }
 
-export function setSkinState(mat, { sick = 0, jaundice = 0, flush = 0, headY } = {}) {
+export function setSkinState(mat, { sick = 0, jaundice = 0, flush = 0, headY, headR } = {}) {
   const u = mat.userData.uniforms; if (!u) return;
   u.uSick.value += (sick - u.uSick.value) * 0.05;
   u.uJaundice.value += (jaundice - u.uJaundice.value) * 0.05;
   u.uFlush.value += (flush - u.uFlush.value) * 0.08;
   if (headY != null) u.uHeadY.value = headY;
+  if (headR != null) u.uHeadR.value = headR;
 }

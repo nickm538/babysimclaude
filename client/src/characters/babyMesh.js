@@ -170,21 +170,98 @@ function bodyBalls(L) {
 // through the cloth. Building the shell from EVERY ball (inflated) and then discarding the
 // triangles outside the garment guarantees the cloth surface is everywhere outside the skin, and
 // the cut edge becomes the neckline, hem or cuff.
-export function clipGeometry(geo, keep) {
+// A garment shell derived from the body itself, rather than from a second inflated ball field.
+//
+// Re-polygonising an inflated ball set produces a surface with its own topology and — because
+// skinGeometry assigns weights by position — its own skin weights. Under a pose the cloth and the
+// skin then deform differently and the skin surfaces through the cloth in a shredded,
+// triangle-by-triangle pattern that reads as torn clothing. Offsetting the body's own vertices
+// along their own normals gives cloth that shares the body's topology AND its weights, so a cloth
+// vertex is the skin vertex it belongs to plus `thickness` times a rotated normal, in every pose.
+// It also removes an entire marching-cubes pass per garment.
+export function offsetShell(geo, thickness) {
+  const src = geo.clone();
+  if (!src.attributes.normal) src.computeVertexNormals();
+  const p = src.attributes.position, n = src.attributes.normal;
+  for (let i = 0; i < p.count; i++) {
+    p.setXYZ(i, p.getX(i) + n.getX(i) * thickness, p.getY(i) + n.getY(i) * thickness, p.getZ(i) + n.getZ(i) * thickness);
+  }
+  p.needsUpdate = true;
+  src.computeVertexNormals();
+  // face morphs belong to the face; a shirt should not smile
+  src.morphAttributes = {};
+  return src;
+}
+
+// Cut a garment out of a shell along a boundary, through the triangles rather than between them.
+//
+// `f(p)` is a signed field: positive inside the garment, negative outside, so the surface f = 0 is
+// the hem. Every triangle it crosses is split there and the outside part discarded. Keeping or
+// dropping whole triangles by their centroid — the previous approach — left every neckline, cuff and
+// hem a sawtooth half a triangle deep, which at these mesh resolutions is several millimetres of
+// visible zigzag on the most looked-at edges in the game.
+//
+// Cut vertices interpolate position and normal. Bone indices cannot be interpolated, so a cut vertex
+// takes its skinning whole from whichever end of the edge it landed nearer; over half a triangle the
+// weights are effectively identical.
+export function clipGeometry(geo, f) {
   const pos = geo.attributes.position, idx = geo.index;
   if (!idx) return geo;
-  const ia = idx.array, out = [];
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
-  const m = new THREE.Vector3();
-  for (let i = 0; i < ia.length; i += 3) {
-    a.fromBufferAttribute(pos, ia[i]); b.fromBufferAttribute(pos, ia[i + 1]); c.fromBufferAttribute(pos, ia[i + 2]);
-    // judged by the centroid: a cut line then wanders by half a triangle, not by a whole one
-    m.copy(a).add(b).add(c).multiplyScalar(1 / 3);
-    if (keep(m)) out.push(ia[i], ia[i + 1], ia[i + 2]);
+  const nrm = geo.attributes.normal, si = geo.attributes.skinIndex, sw = geo.attributes.skinWeight;
+  const ia = idx.array, n0 = pos.count;
+  const val = new Float32Array(n0), p = new THREE.Vector3();
+  for (let i = 0; i < n0; i++) { p.fromBufferAttribute(pos, i); val[i] = f(p); }
+  const P = [], N = [], SI = [], SW = [], out = [];
+  for (let i = 0; i < n0; i++) {
+    P.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+    if (nrm) N.push(nrm.getX(i), nrm.getY(i), nrm.getZ(i));
+    if (si) SI.push(si.getX(i), si.getY(i), si.getZ(i), si.getW(i));
+    if (sw) SW.push(sw.getX(i), sw.getY(i), sw.getZ(i), sw.getW(i));
   }
+  const cache = new Map();
+  const cut = (a, b) => {
+    const key = a < b ? a * n0 + b : b * n0 + a;
+    const hit = cache.get(key); if (hit !== undefined) return hit;
+    const t = val[a] / (val[a] - val[b]), near = t < 0.5 ? a : b;
+    const v = P.length / 3;
+    P.push(pos.getX(a) + (pos.getX(b) - pos.getX(a)) * t, pos.getY(a) + (pos.getY(b) - pos.getY(a)) * t, pos.getZ(a) + (pos.getZ(b) - pos.getZ(a)) * t);
+    if (nrm) N.push(nrm.getX(a) + (nrm.getX(b) - nrm.getX(a)) * t, nrm.getY(a) + (nrm.getY(b) - nrm.getY(a)) * t, nrm.getZ(a) + (nrm.getZ(b) - nrm.getZ(a)) * t);
+    if (si) SI.push(si.getX(near), si.getY(near), si.getZ(near), si.getW(near));
+    if (sw) SW.push(sw.getX(near), sw.getY(near), sw.getZ(near), sw.getW(near));
+    cache.set(key, v); return v;
+  };
+  for (let i = 0; i < ia.length; i += 3) {
+    const a = ia[i], b = ia[i + 1], c = ia[i + 2];
+    const ka = val[a] >= 0, kb = val[b] >= 0, kc = val[c] >= 0;
+    const k = (ka ? 1 : 0) + (kb ? 1 : 0) + (kc ? 1 : 0);
+    if (k === 0) continue;
+    if (k === 3) { out.push(a, b, c); continue; }
+    // rotate the triangle so the odd vertex comes first; the cyclic order preserves the winding
+    let A, B, C;
+    if (k === 1) {
+      if (ka) { A = a; B = b; C = c; } else if (kb) { A = b; B = c; C = a; } else { A = c; B = a; C = b; }
+      out.push(A, cut(A, B), cut(C, A));
+    } else {
+      if (!ka) { A = a; B = b; C = c; } else if (!kb) { A = b; B = c; C = a; } else { A = c; B = a; C = b; }
+      const ab = cut(A, B), ca = cut(C, A);
+      out.push(ab, B, C, ab, C, ca);
+    }
+  }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  if (nrm) geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  if (si) geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(SI, 4));
+  if (sw) geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(SW, 4));
   geo.setIndex(out);
   return geo;
 }
+
+// Signed-field helpers for writing a garment boundary: `all` is intersection, `any` is union, and
+// `above`/`below`/`within` are the half-spaces. Written this way a boundary reads like the boolean
+// it replaced while still being something a triangle can be cut along.
+export const above = (v, a) => v - a;
+export const below = (v, a) => a - v;
+export const all = (...v) => Math.min(...v);
+export const any = (...v) => Math.max(...v);
 
 // Polygonise a ball set (shared with the adult NPC builder). bounds: {min,max} Vector3 in body units. Returns indexed BufferGeometry in body units.
 export function polygonise(balls, res, bounds, isolation = 1.0, smooth = 4) {
@@ -194,6 +271,7 @@ export function polygonise(balls, res, bounds, isolation = 1.0, smooth = 4) {
   const mc = new MarchingCubes(res, new THREE.MeshBasicMaterial(), false, false, budget);
   mc.isolation = isolation;
   const field = mc.field; field.fill(0);
+  const carve = new Float32Array(field.length); // negative-strength balls, accumulated apart
   const size = bounds.max.clone().sub(bounds.min);
   const inv = new THREE.Vector3(1 / size.x, 1 / size.y, 1 / size.z);
   const n = res;
@@ -210,8 +288,12 @@ export function polygonise(balls, res, bounds, isolation = 1.0, smooth = 4) {
           // smooth falloff (Wyvill-like) keeps blending local
           const q = d2 / (rr * rr); if (q >= 1) continue;
           const f = 1 - q; const val = s * f * f * f / norm;
-          // p-norm accumulation, not a plain sum: see below
-          const v4 = val * val; field[z * n * n + y * n + x] += v4 * v4;
+          // p-norm accumulation, not a plain sum: see below. Positive and negative balls accumulate
+          // separately — val^4 of a negative strength is positive, so a single shared accumulator
+          // made every ball meant to carve (nostrils, the philtrum, an eye socket) add material
+          // instead. The two are combined after the loop.
+          const v4 = val * val, v8 = v4 * v4, i0 = z * n * n + y * n + x;
+          if (val >= 0) field[i0] += v8; else carve[i0] += v8;
         } } }
   }
   // A plain sum of overlapping balls inflates without bound: a limb laid down as six overlapping
@@ -219,7 +301,15 @@ export function polygonise(balls, res, bounds, isolation = 1.0, smooth = 4) {
   // Accumulating val^4 and taking the fourth root gives a soft maximum — one ball is exactly its
   // radius, two touching balls fillet together with a bulge of at most 19%, six stacked on top of
   // each other bulge 57% instead of 600%. Joins stay smooth; nothing balloons.
-  for (let i = 0; i < field.length; i++) if (field[i] > 0) field[i] = Math.sqrt(Math.sqrt(field[i]));
+  // Carving is deliberately gentler than adding. A nostril or a philtrum is authored smaller than one
+  // grid cell, so subtracting at full strength does not cut a nostril — it aliases into a fold across
+  // two cells. At this weight the same balls read as the shallow dimples they are meant to be.
+  const CARVE = 0.35;
+  const root4 = (v) => Math.sqrt(Math.sqrt(v));
+  for (let i = 0; i < field.length; i++) {
+    const add = field[i] > 0 ? root4(field[i]) : 0, sub = carve[i] > 0 ? root4(carve[i]) * CARVE : 0;
+    field[i] = add - sub;
+  }
   mc.update();
   const g = mc.geometry;
   const count = Math.max(0, Number.isFinite(g.drawRange.count) ? g.drawRange.count : 0);
@@ -491,18 +581,33 @@ export function buildBabyBody({ days = 0, skinMat, clothMat, diaperMat, res = 84
   body.add(bones[0]); body.bind(skeleton);
   body.frustumCulled = false;
 
-  // clothing shells: onesie (torso + upper limbs) and diaper — same skeleton, expanded balls
-  const torsoNames = new Set();
-  const isTorso = (b) => b[1] > L.J.hips.y - L.P.thigh * 0.5 && b[1] < L.J.neck.y - 0.005 && Math.abs(b[0]) < L.P.torsoW + 0.012;
-  const cloth = balls.filter(isTorso).map(([x, y, z, r, s]) => [x, y, z, r * 1.07 + 0.004, s]);
-  const clothGeo = polygonise(cloth, 64, bounds, 1.0);
-  skinGeometry(clothGeo, L, boneIndex);
-  const onesie = new THREE.SkinnedMesh(clothGeo, clothMat); onesie.castShadow = true; onesie.frustumCulled = false; onesie.bind(skeleton);
-  const diaperBalls = balls.filter((b) => b[1] > L.J.hips.y - L.P.thigh * 0.4 && b[1] < L.J.hips.y + L.P.torsoLen * 0.18 && Math.abs(b[0]) < L.P.torsoW + 0.02).map(([x, y, z, r, s]) => [x, y, z, r * 1.06 + 0.003, s]);
-  const diaperGeo = polygonise(diaperBalls, 56, bounds, 1.0);
-  skinGeometry(diaperGeo, L, boneIndex);
-  const diaper = new THREE.SkinnedMesh(diaperGeo, diaperMat); diaper.frustumCulled = false; diaper.bind(skeleton);
-  void torsoNames;
+  // Clothing: one shell offset off the body, cut into a onesie and a diaper. Cutting a garment out
+  // of the whole-body shell is what keeps cloth at the shoulders and crotch — building it from a
+  // subset of the balls left the shell rounding off into thin air where the subset ended, and skin
+  // came through at exactly those seams.
+  const P = L.P;
+  const onesieShell = offsetShell(geo, P.torsoW * 0.055 + 0.0035);
+  const sleeveEnd = L.J.elbowR.x + P.foreArm * 0.35;
+  const onesieKeep = (p) => all(
+    above(p.y, L.J.hips.y - P.thigh * 0.62), below(p.y, L.J.neck.y + P.neck * 0.4),
+    any(below(Math.abs(p.x), P.torsoW + 0.02),
+        all(below(Math.abs(p.x), sleeveEnd), above(p.y, L.J.hips.y + P.torsoLen * 0.45))),
+  );
+  clipGeometry(onesieShell, onesieKeep);
+  const onesie = new THREE.SkinnedMesh(onesieShell, clothMat); onesie.castShadow = true; onesie.receiveShadow = true; onesie.frustumCulled = false; onesie.bind(skeleton);
+  // A diaper is bulky, so it stands further off the skin than the onesie and, being outermost at the
+  // hips, further off than the onesie stands too.
+  const diaperShell = offsetShell(geo, P.torsoW * 0.13 + 0.006);
+  const diaperKeep = (p) => all(
+    above(p.y, L.J.hips.y - P.thigh * 0.42), below(p.y, L.J.hips.y + P.torsoLen * 0.26),
+    below(Math.abs(p.x), P.torsoW + P.legR * 1.5),
+  );
+  clipGeometry(diaperShell, diaperKeep);
+  const diaper = new THREE.SkinnedMesh(diaperShell, diaperMat); diaper.castShadow = true; diaper.frustumCulled = false; diaper.bind(skeleton);
+  // A clip predicate that silently rejects everything leaves the child naked and nothing complains,
+  // so the triangle counts come out with the model and the smoke asserts on them.
+  const tris = (m) => (m.geometry.index ? m.geometry.index.count : 0) / 3;
+  const garmentTris = { onesie: tris(onesie), diaper: tris(diaper) };
   const surface = new HeadSurface(geo, L.headCenter, L.P.headR);
-  return { body, onesie, diaper, skeleton, bones: byName, layout: L, morphNames, surface };
+  return { body, onesie, diaper, skeleton, bones: byName, layout: L, morphNames, surface, garmentTris };
 }

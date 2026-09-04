@@ -331,3 +331,39 @@ test('unprompted speech reaches the journal as its own event type', () => {
   for (let i = 0; i < 200 && !g.journal.some((e) => e.type === 'says'); i++) advance(g, 900);
   assert.ok(g.journal.some((e) => e.type === 'says'), 'the client picks these up by type to put them in the chat thread');
 });
+
+test('adversarial chat input never throws and never corrupts a stat', () => {
+  const inputs = ['', '   ', 'I HATE YOU!!!', 'say ' + 'x'.repeat(300), '<script>alert(1)</script>',
+    'tidy up and go to bed and eat your dinner', '你好宝宝', '?'.repeat(200), 'sorry sorry sorry',
+    'go wash the dishes come here water the plants', 'say', 'drink', 'COME HERE RIGHT NOW'];
+  for (const days of [0, 400, 1200]) {
+    for (const text of inputs) {
+      const g = child(days, null, `fuzz-${days}`);
+      assert.doesNotThrow(() => {
+        const parsed = parseIntent(text, 'plants', 'mama');
+        applyWords(g, parsed, classifyTone(text));
+        if (parsed.command) resolveCommand(g, parsed, makeRng(2), applyAction);
+      }, `threw on ${JSON.stringify(text).slice(0, 40)} at ${days}d`);
+      for (const [k, v] of Object.entries(g.baby.emo)) {
+        assert.ok(Number.isFinite(v) && v >= 0 && v <= 100, `${k} went to ${v} on ${JSON.stringify(text).slice(0, 30)}`);
+      }
+      for (const [k, v] of Object.entries(g.baby.needs)) assert.ok(Number.isFinite(v), `${k} is ${v}`);
+    }
+  }
+});
+
+test('every action still works on a game that never met the story or social layers', async () => {
+  const { createGame: bare } = await import('../server/sim/state.js');
+  const { EXTRA_ACTION_IDS } = await import('../server/sim/actions2.js');
+  const ids = ['smack', 'yell', 'scream', 'leave', 'chore_dishes', 'talk', 'hold', 'feed', 'choice', ...EXTRA_ACTION_IDS];
+  for (const days of [0, 800, 1500]) {
+    for (const id of ids) {
+      const g = bare({ userId: 'u', babyName: 'Bare', sex: 'girl', id: `bare-${days}` });
+      g.sim.time = days * DAY;
+      let r;
+      assert.doesNotThrow(() => { r = applyAction(g, id, { word: 'mama', tone: 'harsh', minutes: 5 }, makeRng(3)); }, `${id} threw at ${days}d on a bare game`);
+      assert.equal(typeof r.ok, 'boolean', `${id} must return { ok }`);
+      assert.doesNotThrow(() => advance(g, 600), `advancing after ${id} threw`);
+    }
+  }
+});

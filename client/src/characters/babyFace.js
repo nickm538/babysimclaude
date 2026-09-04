@@ -1,7 +1,7 @@
 // Face rig attached to the head bone: eyes with iris/pupil, eyelids that blink and squint, brows, ears,
 // mouth cavity/tongue/lips (revealed by the cry/open morphs) and instanced hair strands.
 import * as THREE from 'three';
-import { skinMicroTexture } from '../engine/textures.js';
+import { skinMicroTexture, matte } from '../engine/textures.js';
 
 // Hair is not a matte solid: the highlight runs along the strand, not across it, and shifts as the
 // head turns. Anisotropy is that behaviour. Shared by scalp hair, brows and lashes so they match.
@@ -92,9 +92,9 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
   // mouth: cavity (dark) + tongue + lips
   const mouthSurf = onSurface(V(0, -0.45, 1), 0);
   const mouthPos = onSurface(V(0, -0.45, 1), -R * 0.34);
-  const cavity = new THREE.Mesh(new THREE.SphereGeometry(R * 0.2, 20, 14), new THREE.MeshStandardMaterial({ color: 0x4a1418, roughness: 0.6 }));
+  const cavity = new THREE.Mesh(new THREE.SphereGeometry(R * 0.2, 20, 14), new THREE.MeshPhysicalMaterial({ color: 0x4a1418, roughness: 0.5, clearcoat: 0.7, clearcoatRoughness: 0.35 }));
   cavity.position.copy(mouthPos); cavity.scale.set(1.2, 0.8, 0.9); face.add(cavity);
-  const tongue = new THREE.Mesh(new THREE.SphereGeometry(R * 0.12, 16, 12), new THREE.MeshStandardMaterial({ color: 0xd76a72, roughness: 0.45, clearcoat: 0.4 }));
+  const tongue = new THREE.Mesh(new THREE.SphereGeometry(R * 0.12, 16, 12), new THREE.MeshPhysicalMaterial({ color: 0xd76a72, roughness: 0.4, clearcoat: 0.75, clearcoatRoughness: 0.25, sheen: 0.3, sheenColor: new THREE.Color(0xff9a8a) }));
   tongue.position.set(mouthPos.x, mouthPos.y - R * 0.06, mouthPos.z - R * 0.02); tongue.scale.set(1.1, 0.5, 1.2); face.add(tongue);
   const lipMat = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(appearance.skinTone || '#f0c9ae').lerp(new THREE.Color(0xd66c68), 0.55),
@@ -110,22 +110,27 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
   F.mouth = { cavity, tongue, upperLip, lowerLip, y0: lowerLip.position.y, uy0: upperLip.position.y, R };
   // pacifier (hidden)
   const paci = new THREE.Group(); paci.position.copy(mouthSurf).add(V(0, 0, R * 0.05)); paci.visible = false;
-  paci.add(new THREE.Mesh(new THREE.TorusGeometry(R * 0.2, R * 0.03, 8, 24), new THREE.MeshStandardMaterial({ color: 0x8fd3f4, roughness: 0.4 })));
-  const shield = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.26, R * 0.26, R * 0.05, 24), new THREE.MeshStandardMaterial({ color: 0x8fd3f4, roughness: 0.4 })); shield.rotation.x = Math.PI / 2; paci.add(shield);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(R * 0.12, R * 0.03, 8, 20), new THREE.MeshStandardMaterial({ color: 0xffffff })); ring.position.z = R * 0.1; ring.rotation.x = Math.PI / 2; paci.add(ring);
+  paci.add(new THREE.Mesh(new THREE.TorusGeometry(R * 0.2, R * 0.03, 10, 28), matte({ color: 0x8fd3f4, roughness: 0.4, clearcoat: 0.55, clearcoatRoughness: 0.25 })));
+  const shield = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.26, R * 0.26, R * 0.05, 28), matte({ color: 0x8fd3f4, roughness: 0.4, clearcoat: 0.55, clearcoatRoughness: 0.25 })); shield.rotation.x = Math.PI / 2; paci.add(shield);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(R * 0.12, R * 0.03, 10, 24), matte({ color: 0xf4f6f8, roughness: 0.45, clearcoat: 0.5 })); ring.position.z = R * 0.1; ring.rotation.x = Math.PI / 2; paci.add(ring);
   face.add(paci); F.pacifier = paci;
 
   // hair: instanced tapered strands on the scalp; amount and length grow with age
   const amount = Math.max(0.05, Math.min(1, Number(appearance.hairAmount ?? 0.5) || 0.5));
   const count = Math.floor(200 + amount * 1500 + Math.min(1, days / 700) * 3600);
-  const len = R * (0.09 + amount * 0.1 + Math.min(1, days / 900) * 0.4);
-  const strandGeo = new THREE.CylinderGeometry(R * 0.002, R * 0.008, len, 5, 3);
+  // Short and thick beats long and thin: strands this size merge into a mass of hair, where the same
+  // count at twice the length and half the width reads as a pincushion of separate wires.
+  const len = R * (0.07 + amount * 0.06 + Math.min(1, days / 900) * 0.24);
+  const strandGeo = new THREE.CylinderGeometry(R * 0.0025, R * 0.011, len, 5, 4);
   strandGeo.translate(0, len / 2, 0);
-  // bend strands
-  const sp = strandGeo.attributes.position; for (let i = 0; i < sp.count; i++) { const y = sp.getY(i); sp.setZ(i, sp.getZ(i) + (y / len) * (y / len) * len * 0.6); }
+  // Curve each strand back and down along the skull, in the strand's own frame. The bend is what
+  // makes it hair; a straight tapered rod at any density is a pincushion.
+  const sp = strandGeo.attributes.position;
+  for (let i = 0; i < sp.count; i++) { const t = sp.getY(i) / len; sp.setZ(i, sp.getZ(i) - t * t * len * 0.85); sp.setY(i, sp.getY(i) - t * t * len * 0.34); }
+  sp.needsUpdate = true; strandGeo.computeVertexNormals();
   const hairMat = hairMaterial(appearance.hairColor || '#3b2417', 0.5);
   const hair = new THREE.InstancedMesh(strandGeo, hairMat, count);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), nrm = new THREE.Vector3(), col = new THREE.Color();
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), rollQ = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), nrm = new THREE.Vector3(), col = new THREE.Color();
   let placed = 0, tries = 0;
   while (placed < count && tries < count * 20) {
     tries++;
@@ -139,11 +144,14 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
     if (rel.z > R * 0.45 && rel.y < R * 0.55) continue;
     if (rel.z > R * 0.7) continue;
     const density = amount * (0.5 + 0.5 * Math.max(0, rel.y / R)); if (Math.random() > density + 0.35) continue;
-    // orientation: along normal, tilted toward the back/down
-    const dir = nrm.clone().multiplyScalar(0.55).add(new THREE.Vector3(0, -0.5, -0.9)).normalize();
+    // Orientation follows the scalp normal, only leaning back and down — the lying-over is in the
+    // geometry above. When the lean dominated the normal instead, hair on the crown grew out
+    // sideways and the head wore a sunburst.
+    const dir = nrm.clone().multiplyScalar(0.78).add(new THREE.Vector3(0, -0.28, -0.34)).normalize();
     q.setFromUnitVectors(up, dir);
+    q.multiply(rollQ.setFromAxisAngle(up, Math.random() * Math.PI * 2)); // vary which way each bend falls
     const s = 0.7 + Math.random() * 0.6;
-    m.compose(pos, q, new THREE.Vector3(1, s, 1));
+    m.compose(pos, q, new THREE.Vector3(0.85 + Math.random() * 0.4, s, 0.85 + Math.random() * 0.4));
     hair.setMatrixAt(placed, m);
     col.set(hairMat.color).offsetHSL(0, 0, (Math.random() - 0.5) * 0.12); hair.setColorAt(placed, col);
     placed++;

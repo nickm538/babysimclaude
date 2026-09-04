@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { canvas, mulberry32, hashString, fbm, toTexture, matte } from '../engine/textures.js';
 
 const FRAME_W = matte({ color: 0xf3efe7, roughness: 0.5 });
+// Mount board is cotton card: nearly white, but with a visible tooth that breaks up the highlight.
+const MOUNT_CARD = matte({ color: 0xfdfbf6, roughness: 0.95 });
 
 function texFromCanvas(c) { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; }
 
@@ -114,8 +116,18 @@ function framed(art, w, h, { depth = 0.035, mat = FRAME_W } = {}) {
   const b = 0.035;
   const back = new THREE.Mesh(new THREE.BoxGeometry(w + b * 2, h + b * 2, depth), mat);
   back.castShadow = true; back.receiveShadow = true; grp.add(back);
-  const mount = new THREE.Mesh(new THREE.PlaneGeometry(w + b * 1.1, h + b * 1.1), new THREE.MeshStandardMaterial({ color: 0xfdfbf6, roughness: 0.9 }));
-  mount.position.z = depth * 0.51; grp.add(mount);
+  // A window mount, not a white rectangle behind the picture: real card with a bevelled aperture cut
+  // through it. The bevel is the giveaway detail — it catches a line of light along the top edge and
+  // is the whole reason a mounted print looks framed rather than printed on the wall.
+  const ow = w + b * 1.1, oh = h + b * 1.1, aw = w * 0.9, ah = h * 0.9;
+  const shape = new THREE.Shape();
+  shape.moveTo(-ow / 2, -oh / 2); shape.lineTo(ow / 2, -oh / 2); shape.lineTo(ow / 2, oh / 2); shape.lineTo(-ow / 2, oh / 2); shape.closePath();
+  const hole = new THREE.Path();
+  hole.moveTo(-aw / 2, -ah / 2); hole.lineTo(-aw / 2, ah / 2); hole.lineTo(aw / 2, ah / 2); hole.lineTo(aw / 2, -ah / 2); hole.closePath();
+  shape.holes.push(hole);
+  const mountGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.0016, bevelEnabled: true, bevelThickness: 0.0018, bevelSize: 0.0022, bevelSegments: 1, curveSegments: 1 });
+  const mount = new THREE.Mesh(mountGeo, MOUNT_CARD);
+  mount.position.z = depth * 0.55 + 0.0004; mount.castShadow = true; grp.add(mount);
   return grp;
 }
 

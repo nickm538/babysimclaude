@@ -3,13 +3,14 @@
 // smoothed, skinned to a skeleton — but with adult proportions, real clothing volumes over the body
 // rather than a flat colour, and an idle that never quite stands still.
 import * as THREE from 'three';
-import { polygonise, skinGeometry, makeBones, HeadSurface, clipGeometry, handBalls, footBalls } from './babyMesh.js';
+import { polygonise, skinGeometry, makeBones, HeadSurface, clipGeometry, offsetShell, handBalls, footBalls, above, below, all, any } from './babyMesh.js';
 import { makeSkinMaterial } from './skinMaterial.js';
 import { irisTexture, hairMaterial } from './babyFace.js';
 import { fabricTexture, clothMaterial, skinMicroTexture } from '../engine/textures.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 // Adult proportions in metres. `build` 0..1 goes slight -> heavy, `h` is standing height.
 export function adultProportions({ h = 1.68, build = 0.5, female = true } = {}) {
@@ -45,10 +46,10 @@ export function adultLayout(opts = {}) {
     J['elbow' + s] = V(sx * (P.shoulderW + P.upperArm), shY, 0);
     J['wrist' + s] = V(sx * (P.shoulderW + P.upperArm + P.foreArm), shY, 0);
     J['handTip' + s] = V(sx * (P.shoulderW + P.upperArm + P.foreArm + P.handR * 1.7), shY, 0);
-    J['hip' + s] = V(sx * P.hipR * 0.55, hipY, 0);
-    J['knee' + s] = V(sx * P.hipR * 0.55, hipY - P.thigh, 0);
-    J['ankle' + s] = V(sx * P.hipR * 0.55, hipY - P.thigh - P.shin, 0);
-    J['toe' + s] = V(sx * P.hipR * 0.55, hipY - P.thigh - P.shin - P.footR * 0.55, P.footL);
+    J['hip' + s] = V(sx * P.hipR * 0.74, hipY, 0);
+    J['knee' + s] = V(sx * P.hipR * 0.74, hipY - P.thigh, 0);
+    J['ankle' + s] = V(sx * P.hipR * 0.74, hipY - P.thigh - P.shin, 0);
+    J['toe' + s] = V(sx * P.hipR * 0.74, hipY - P.thigh - P.shin - P.footR * 0.55, P.footL);
   }
   const bones = [
     ['hips', 'hips', 'spine', null], ['spine', 'spine', 'chest', 'hips'], ['chest', 'chest', 'neck', 'spine'],
@@ -71,26 +72,44 @@ export function adultLayout(opts = {}) {
 
 // Flesh volumes. A torso is not a cylinder: it tapers from ribcage to waist and flares again at the
 // hips, and that S is most of what makes a silhouette read as a person rather than a mannequin.
+// The head and face on their own, so they can be polygonised twice at two resolutions — see
+// buildFaceMesh. `grow` inflates every radius a little for the high-resolution copy, which is what
+// keeps that copy strictly outside the body's own coarse head instead of z-fighting with it.
+function adultHeadBalls(B, L, grow = 1) {
+  const P = L.P, hc = L.headCenter;
+  const g = (r) => r * grow;
+  const ball = (p, r, s = 1) => B.push([p.x, p.y, p.z, g(r), s]);
+  // skull: cranium, occiput, brow ridge, jaw, chin
+  ball(hc, P.headR, 1.0);
+  ball(V(0, hc.y + P.headR * 0.06, -P.headR * 0.42), P.headR * 0.82, 0.9);
+  ball(V(0, hc.y + P.headR * 0.42, P.headR * 0.2), P.headR * 0.56, 0.55);
+  ball(V(0, hc.y - P.headR * 0.55, P.headR * 0.16), P.headR * 0.58, 0.75);   // jaw
+  ball(V(0, hc.y - P.headR * 0.78, P.headR * 0.3), P.headR * 0.3, 0.5);      // chin
+  // brow ridge, a real one: it is what stops a head reading as an egg
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.3, hc.y + P.headR * 0.26, P.headR * 0.76), P.headR * 0.16, 0.28);
+  // nose: bridge, tip, nostril wings — and carved nostrils and a philtrum below
+  ball(V(0, hc.y + P.headR * 0.22, P.headR * 0.62), P.headR * 0.07, 0.24);
+  ball(V(0, hc.y + P.headR * 0.05, P.headR * 0.72), P.headR * 0.075, 0.3);
+  ball(V(0, hc.y - P.headR * 0.12, P.headR * 0.82), P.headR * 0.105, 0.42);
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.095, hc.y - P.headR * 0.17, P.headR * 0.76), P.headR * 0.06, 0.3);
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.075, hc.y - P.headR * 0.2, P.headR * 0.79), P.headR * 0.042, -0.5);
+  ball(V(0, hc.y - P.headR * 0.32, P.headR * 0.78), P.headR * 0.05, -0.22);   // philtrum
+  // mouth: a fuller upper and lower lip mass with the line between them carved
+  ball(V(0, hc.y - P.headR * 0.44, P.headR * 0.74), P.headR * 0.1, 0.2);
+  ball(V(0, hc.y - P.headR * 0.47, P.headR * 0.76), P.headR * 0.08, -0.3);
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.34, hc.y + P.headR * 0.05, P.headR * 0.84), P.headR * 0.15, -0.4);  // eye sockets
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.5, hc.y - P.headR * 0.2, P.headR * 0.45), P.headR * 0.3, 0.4); // cheekbones
+  // temples pulled in slightly, so the skull narrows above the cheekbones the way a real one does
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.92, hc.y + P.headR * 0.3, P.headR * 0.1), P.headR * 0.22, -0.16);
+}
+
 function adultBalls(L, female) {
   const { J, P } = L, B = [];
   const ball = (p, r, s = 1) => B.push([p.x, p.y, p.z, r, s]);
   const seg = (a, b, r0, r1, n, s = 1) => { for (let i = 0; i <= n; i++) { const t = i / n; B.push([lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t), lerp(r0, r1, t), s]); } };
   const hc = L.headCenter;
 
-  // skull: cranium, occiput, brow ridge, jaw, chin, nose
-  ball(hc, P.headR, 1.0);
-  ball(V(0, hc.y + P.headR * 0.06, -P.headR * 0.42), P.headR * 0.82, 0.9);
-  ball(V(0, hc.y + P.headR * 0.42, P.headR * 0.2), P.headR * 0.56, 0.55);
-  ball(V(0, hc.y - P.headR * 0.55, P.headR * 0.16), P.headR * 0.58, 0.75);   // jaw
-  ball(V(0, hc.y - P.headR * 0.78, P.headR * 0.3), P.headR * 0.3, 0.5);      // chin
-  // nose: bridge, tip, nostril wings — and carved nostrils and a philtrum below
-  ball(V(0, hc.y + P.headR * 0.1, P.headR * 0.66), P.headR * 0.085, 0.3);
-  ball(V(0, hc.y - P.headR * 0.12, P.headR * 0.8), P.headR * 0.115, 0.42);
-  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.09, hc.y - P.headR * 0.17, P.headR * 0.75), P.headR * 0.06, 0.3);
-  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.06, hc.y - P.headR * 0.21, P.headR * 0.78), P.headR * 0.035, -0.28);
-  ball(V(0, hc.y - P.headR * 0.3, P.headR * 0.78), P.headR * 0.04, -0.12);
-  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.34, hc.y + P.headR * 0.03, P.headR * 0.82), P.headR * 0.16, -0.3);  // eye sockets
-  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.5, hc.y - P.headR * 0.2, P.headR * 0.45), P.headR * 0.3, 0.4); // cheekbones
+  adultHeadBalls(B, L, 1);
 
   // neck into shoulders (trapezius)
   seg(J.neck.clone().setY(J.neck.y - 0.01), V(0, hc.y - P.headR * 0.72, 0), P.neckR, P.neckR * 0.9, 3, 0.95);
@@ -112,8 +131,8 @@ function adultBalls(L, female) {
     handBalls(B, J['wrist' + s], J['handTip' + s], sx, V(0, 0, -1), P.handR / 0.045);
 
     // legs: thigh mass, knee, calf belly high on the shin, narrow ankle
-    ball(J['hip' + s], P.legR * 1.2, 0.9);
-    seg(J['hip' + s], J['knee' + s], P.legR * 1.25, P.legR * 0.82, 5);
+    ball(J['hip' + s], P.legR * 1.05, 0.9);
+    seg(J['hip' + s], J['knee' + s], P.legR * 1.12, P.legR * 0.78, 5);
     ball(J['knee' + s], P.legR * 0.8, 0.8);
     const ank = J['ankle' + s];
     ball(V(J['knee' + s].x, lerp(J['knee' + s].y, ank.y, 0.32), -P.legR * 0.28), P.legR * 0.86, 0.75); // calf
@@ -172,6 +191,10 @@ export class Adult {
     const res = this.lowSpec ? 56 : this.mobile ? 64 : 80;
 
     this.skin = makeSkinMaterial({ skinTone: look.skinTone, sss: 0.32, blush: 0.14 });
+    // The blush zones are placed relative to this: without it they default to half a metre up the
+    // model, which on an adult is the thighs — cheeks on the legs and none on the face.
+    this.skin.userData.uniforms.uHeadY.value = L.headCenter.y;
+    this.skin.userData.uniforms.uHeadR.value = L.P.headR;
     const geo = polygonise(balls, res, bounds, 1.0, 3);
     const { bones, byName } = makeBones(L);
     const boneIndex = Object.fromEntries(bones.map((b, i) => [b.name, i]));
@@ -183,35 +206,75 @@ export class Adult {
     this.root.add(body);
     this.body = body; this.bones = byName; this.skeleton = skeleton;
 
-    // Clothing as real volume over the body. The whole body is inflated into one shell and each
-    // garment is cut out of it, so the cloth is everywhere outside the skin — building a top from
-    // only the torso's balls left gaps at the shoulders and neck where flesh poked through.
+    // Clothing as real volume over the body: each garment is cut out of a shell offset off the body's
+    // own surface, so it carries the body's topology and, crucially, the body's skin weights. A shell
+    // re-polygonised from inflated balls got its own weights and drifted through the skin under a
+    // pose, which looked exactly like torn clothes.
     const P = L.P;
-    const shell = balls.map(([x, y, z, r, s]) => [x, y, z, r * 1.06 + 0.009, s]);
-    const shellGeo = polygonise(shell, Math.round(res * 0.85), bounds, 1.0, 3);
     const sleeveEnd = P.shoulderW + P.upperArm * 0.9;
-    const topKeep = (p) => (p.y > L.J.hips.y - 0.03 && p.y < L.J.neck.y - P.neckR * 0.45 && Math.abs(p.x) <= P.shoulderW + 0.02)
-      || (p.y > L.J.chest.y - 0.16 && p.y < L.J.neck.y && Math.abs(p.x) > P.shoulderW - 0.02 && Math.abs(p.x) < sleeveEnd);
-    const legKeep = (p) => p.y < L.J.hips.y + P.hipR * 0.4 && p.y > L.J.ankleR.y + 0.025 && Math.abs(p.x) < P.hipR * 1.6;
+    const topKeep = (p) => any(
+      all(above(p.y, L.J.hips.y - 0.03), below(p.y, L.J.neck.y - P.neckR * 0.45), below(Math.abs(p.x), P.shoulderW + 0.02)),
+      all(above(p.y, L.J.chest.y - 0.16), below(p.y, L.J.neck.y), above(Math.abs(p.x), P.shoulderW - 0.02), below(Math.abs(p.x), sleeveEnd)),
+    );
+    const legKeep = (p) => all(below(p.y, L.J.hips.y + P.hipR * 0.4), above(p.y, L.J.ankleR.y + 0.025), below(Math.abs(p.x), P.hipR * 1.6));
 
     // DoubleSide: the cut edges are the neckline, hem and cuffs, and you see the inside of a collar.
     this.clothMat = clothMaterial(fabricTexture({ color: look.clothColor, repeat: 8, weave: 3 }), { sheen: 0.55, sheenTint: 0.5, extra: { side: THREE.DoubleSide } });
     this.trouserMat = clothMaterial(fabricTexture({ color: '#3a4049', repeat: 9, weave: 4 }), { sheen: 0.3, sheenTint: 0.25, extra: { side: THREE.DoubleSide } });
 
-    for (const [keep, mat] of [[topKeep, this.clothMat], [legKeep, this.trouserMat]]) {
-      const g = clipGeometry(shellGeo.clone(), keep);
+    // Trousers stand further off the skin than the top: they are heavier cloth, and where the two
+    // overlap at the waist the trousers should be the ones on the outside.
+    for (const [keep, mat, thick] of [[topKeep, this.clothMat, 0.009], [legKeep, this.trouserMat, 0.012]]) {
+      const g = clipGeometry(offsetShell(geo, thick), keep);
       if (!g.index || g.index.count === 0) continue;
-      skinGeometry(g, L, boneIndex);
       const m = new THREE.SkinnedMesh(g, mat);
       m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false;
       m.bind(skeleton);
       body.add(m);
     }
-    shellGeo.dispose();
 
-    this.surface = new HeadSurface(geo, L.headCenter, P.headR);
+    // A head built from spheres is as wide as it is deep; a real skull is about a sixth narrower than
+    // it is long. Scaling the head bone narrows the high-resolution head, the face parts, the hair and
+    // the body's own skinned head together, so nothing can end up outside anything else.
+    byName.head.scale.set(0.87, 1, 1.06);
+    this.buildFaceMesh();
+    this.surface = new HeadSurface(this.headSurfaceGeo, L.headCenter, P.headR);
     this.buildHead();
     this.rest = bones.map((b) => b.quaternion.clone());
+  }
+
+
+  // The face needs a grid the body cannot give it.
+  //
+  // One marching-cubes grid over a 1.5 m adult puts about 17 mm between samples. A nostril is 4 mm
+  // across and a nose 40 mm, so on the body grid every facial feature is filtered away before it is
+  // ever polygonised — which is why the visitors had smooth ovoids for heads however much anatomy the
+  // ball set described. The head is therefore polygonised a second time on a box a little bigger than
+  // itself, where the same balls get four times the resolution, and that mesh is parented rigidly to
+  // the head bone. It is built from slightly grown radii so it strictly encloses the body's own head,
+  // which then never shows; the neck stump inside it is left ungrown, so it stays buried in the neck.
+  buildFaceMesh() {
+    const L = this.layout, P = L.P, hc = L.headCenter;
+    const B = [];
+    adultHeadBalls(B, L, 1.022);
+    // an ungrown neck stump, so the head closes inside the body's neck rather than at the jaw
+    const nTop = V(0, L.J.head.y, 0), nBot = V(0, L.J.neck.y - P.neckR * 0.9, 0);
+    for (let i = 0; i <= 4; i++) { const t = i / 4; B.push([0, nTop.y + (nBot.y - nTop.y) * t, 0, P.neckR * (0.9 - t * 0.18), 0.95]); }
+    const r = P.headR;
+    const bounds = {
+      min: V(-r * 1.75, nBot.y - r * 0.35, hc.z - r * 1.85),
+      max: V(r * 1.75, L.J.headTop.y + r * 0.2, hc.z + r * 1.85),
+    };
+    const res = this.lowSpec ? 48 : this.mobile ? 64 : 88;
+    const geo = polygonise(B, res, bounds, 1.0, 3);
+    // HeadSurface is queried in model space, so it keeps the model-space copy; the mesh itself hangs
+    // off the head bone, whose origin is L.J.head.
+    this.headSurfaceGeo = geo.clone();
+    geo.translate(-L.J.head.x, -L.J.head.y, -L.J.head.z);
+    const mesh = new THREE.Mesh(geo, this.skin);
+    mesh.castShadow = true; mesh.receiveShadow = true; mesh.frustumCulled = false;
+    this.bones.head.add(mesh);
+    this.headMesh = mesh;
   }
 
   buildHead() {
@@ -228,7 +291,7 @@ export class Adult {
     this.eyes = [];
     for (const sx of [-1, 1]) {
       const socket = new THREE.Group();
-      socket.position.copy(onSurface(V(sx * 0.36, 0.1, 1), -eyeR * 0.55));
+      socket.position.copy(onSurface(V(sx * 0.36, 0.1, 1), -eyeR * 0.95));  // an eyeball sits in a socket, not on a face
       const ball = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 24, 16), sclera); socket.add(ball);
       const ir = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 1.012, 24, 12, 0, Math.PI * 2, 0, 0.58), iris);
       ir.rotation.x = Math.PI / 2; ir.scale.z = 1.12; socket.add(ir);
@@ -241,11 +304,31 @@ export class Adult {
       face.add(socket);
       this.eyes.push({ socket, upper, lower, sx });
 
-      const brow = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.14, P.headR * 0.017, 6, 16, Math.PI * 0.5),
-        hairMaterial(new THREE.Color(look.hairColor).multiplyScalar(0.8), 0.92));
-      brow.position.copy(onSurface(V(sx * 0.35, 0.25, 1), -P.headR * 0.005));
-      brow.rotation.set(0.1, sx * 0.22, Math.PI * 0.74 + sx * 0.06);
-      brow.scale.set(1, 0.9, 0.2);
+      // A brow follows the brow ridge and tapers at both ends. Built as a tube along a curve laid on
+      // the head's own surface, so it sits on the face instead of floating as a flat slab over it.
+      const browPts = [];
+      for (let k = 0; k <= 6; k++) {
+        const t = k / 6;
+        const across = sx * (0.16 + t * 0.42);                 // inner end near the nose, outer at the temple
+        const rise = 0.3 + Math.sin(t * Math.PI) * 0.055 - t * 0.055;
+        browPts.push(onSurface(V(across, rise, 1 - t * 0.35).normalize(), P.headR * 0.012));
+      }
+      const browCurve = new THREE.CatmullRomCurve3(browPts);
+      const browGeo = new THREE.TubeGeometry(browCurve, 16, P.headR * 0.021, 7, false);
+      { // taper both ends: a brow is thin where it starts and where it finishes
+        const bp = browGeo.attributes.position, mid = new THREE.Vector3();
+        for (let k = 0; k <= 16; k++) {
+          const t = k / 16, w = Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.15)), 0.55);
+          browCurve.getPoint(t, mid);
+          for (let r = 0; r <= 7; r++) {
+            const vi = k * 8 + r;
+            bp.setXYZ(vi, mid.x + (bp.getX(vi) - mid.x) * w, mid.y + (bp.getY(vi) - mid.y) * w * 0.62, mid.z + (bp.getZ(vi) - mid.z) * w);
+          }
+        }
+        bp.needsUpdate = true; browGeo.computeVertexNormals();
+      }
+      const brow = new THREE.Mesh(browGeo, hairMaterial(new THREE.Color(look.hairColor).multiplyScalar(0.75), 0.92));
+      brow.castShadow = false;
       face.add(brow);
 
       // the same three-piece ear the baby has: a curled rim, a hollow and a lobe
@@ -262,14 +345,14 @@ export class Adult {
     }
 
     // mouth: a closed line that catches shadow, not a painted stripe
-    const lips = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.135, P.headR * 0.026, 8, 20, Math.PI),
+    const lips = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.185, P.headR * 0.03, 10, 26, Math.PI),
       new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(look.skinTone).multiplyScalar(0.72).lerp(new THREE.Color(0xa2544e), 0.35),
         roughness: 0.45, clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.4, sheenColor: new THREE.Color(0xe08a80),
         normalMap: skinMicroTexture().normalMap || skinMicroTexture().map, normalScale: new THREE.Vector2(0.3, 0.3),
       }));
     lips.position.copy(onSurface(V(0, -0.5, 1), -P.headR * 0.004));
-    lips.rotation.set(Math.PI * 0.5 + 0.2, 0, Math.PI); lips.scale.set(1.05, 1, 0.42);
+    lips.rotation.set(Math.PI * 0.5 + 0.2, 0, Math.PI); lips.scale.set(1.15, 1, 0.36);
     face.add(lips);
 
     // hair: an instanced shell of short strands over the scalp, so it has volume and catches light
@@ -278,40 +361,71 @@ export class Adult {
 
   buildHair() {
     const L = this.layout, P = L.P, look = this.look;
-    // A solid scalp under the strands, so the head reads as a mass of hair with texture on top rather
-    // than a bald skull with lines stuck in it. Strands alone are never dense enough to be opaque.
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 1.02, 40, 28, 0, Math.PI * 2, 0, Math.PI * 0.52), hairMaterial(look.hairColor, 0.62));
-    cap.position.copy(L.headCenter.clone().sub(L.J.head)).add(V(0, P.headR * 0.03, -P.headR * 0.08));
-    cap.rotation.x = -0.12; cap.scale.set(1.02, 1.0, 1.06); cap.castShadow = true;
+    // The hair is a volume; the strands are the texture on it.
+    //
+    // A hemisphere cap plus a separate falling sheet meant two objects that had to keep agreeing with
+    // each other, and the sheet showed its cut edges as hard black bars beside the face. Instead the
+    // hair is one closed shell whose radius is a function of direction: outside the skin over the
+    // scalp, tucked inside it over the face, and swelling down and back by however long this person
+    // wears their hair. A radius function is star-shaped by construction, so the surface can never
+    // self-intersect or leave an edge — the hairline is simply where the shell crosses the skin.
+    const drop = P.headR * (0.3 + look.hairLength * 2.6);
+    const geo = new THREE.SphereGeometry(1, 56, 40);
+    const p = geo.attributes.position, d = new THREE.Vector3();
+    const seed = hashOf(this.id + ':hairshell');
+    for (let i = 0; i < p.count; i++) {
+      d.fromBufferAttribute(p, i).normalize();
+      // scalp mask: no hair over the face, none below the jaw at the front
+      const bare = clamp01((d.z - 0.18) * 2.6) * clamp01((0.62 - d.y) * 1.7);
+      const scalp = 1 - bare;
+      let r = P.headR * (0.9 + scalp * 0.17);
+      // the fall: a swell behind and below the head, strongest just under ear height
+      const back = clamp01(-d.z * 1.1 + 0.4);
+      const band = Math.exp(-Math.pow((d.y + 0.42) / 0.52, 2));
+      r += drop * back * band * scalp;
+      // a slow wave around the head so it is a head of hair, not a moulding
+      r *= 1 + Math.sin(d.x * 7.5 + seed * 0.01) * 0.022 * scalp + Math.sin(d.y * 9.0 + d.z * 4.0) * 0.016 * scalp;
+      p.setXYZ(i, d.x * r, d.y * r, d.z * r);
+    }
+    p.needsUpdate = true;
+    geo.computeVertexNormals();
+    geo.translate(0, L.headCenter.y - L.J.head.y, -P.headR * 0.06);
+    const cap = new THREE.Mesh(geo, hairMaterial(look.hairColor, 0.58));
+    cap.castShadow = true; cap.receiveShadow = true; cap.frustumCulled = false;
     this.bones.head.add(cap);
     this.hairCap = cap;
-    const count = this.lowSpec ? 260 : this.mobile ? 900 : 2200;
-    const len = P.headR * (0.35 + look.hairLength * 2.2);
-    const geo = new THREE.CylinderGeometry(P.headR * 0.012, P.headR * 0.004, len, 4, 1, false);
-    geo.translate(0, len * 0.5, 0);
-    const mat = hairMaterial(look.hairColor, 0.55);
-    const inst = new THREE.InstancedMesh(geo, mat, count);
-    inst.castShadow = true; inst.frustumCulled = false;
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = V(0, 1, 0), scale = V(1, 1, 1);
-    const seed = hashOf(this.id + ':hair');
-    let rnd = seed;
+
+    // Strands on top of that volume: short, thick and bent, so they break the shell's silhouette and
+    // catch light along it. Long straight rods standing off the scalp are a pincushion, not hair.
+    const count = this.lowSpec ? 400 : this.mobile ? 1400 : 3200;
+    const len = P.headR * 0.13;
+    const strand = new THREE.CylinderGeometry(P.headR * 0.005, P.headR * 0.019, len, 4, 4, false);
+    strand.translate(0, len * 0.5, 0);
+    { const sp = strand.attributes.position;
+      for (let i = 0; i < sp.count; i++) { const t = sp.getY(i) / len; sp.setZ(i, sp.getZ(i) - t * t * len * 0.95); sp.setY(i, sp.getY(i) - t * t * len * 0.42); }
+      sp.needsUpdate = true; strand.computeVertexNormals(); }
+    const inst = new THREE.InstancedMesh(strand, hairMaterial(look.hairColor, 0.5), count);
+    // The cap casts the hair's shadow; the strands do not. At shadow-map resolution a few thousand
+    // instanced strands resolve into one opaque blob and drop the whole face into shade.
+    inst.castShadow = false; inst.frustumCulled = false;
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), roll = new THREE.Quaternion();
+    const up = V(0, 1, 0), scale = V(1, 1, 1), pt = new THREE.Vector3();
+    let rnd = hashOf(this.id + ':hair');
     const rand = () => ((rnd = Math.imul(rnd ^ (rnd >>> 15), 2246822519)) >>> 0) / 4294967296;
+    const hairSurf = new HeadSurface(geo, V(0, L.headCenter.y - L.J.head.y, 0), P.headR);
     let n = 0;
     for (let i = 0; i < count * 3 && n < count; i++) {
-      // sample the upper hemisphere, denser at the crown, none across the face
-      const u = rand(), v = rand();
-      const theta = Math.acos(1 - u * 1.05);
-      const phi = v * Math.PI * 2;
+      const u = rand(), v2 = rand();
+      const theta = Math.acos(1 - u * 1.15), phi = v2 * Math.PI * 2;
       const dir = V(Math.sin(theta) * Math.cos(phi), Math.cos(theta), Math.sin(theta) * Math.sin(phi));
-      if (dir.z > 0.35 && dir.y < 0.45) continue;          // forehead and face stay bare
-      if (dir.y < -0.15) continue;
-      const p = this.surface.point(dir, P.headR * 0.01).sub(L.J.head);
-      // strands lie along the skull and fall with gravity — down and back, never straight up
-      const tangentDown = V(dir.x * 0.25, -0.75, -0.55 + dir.z * 0.2).normalize();
-      const tilt = dir.clone().multiplyScalar(0.3).add(tangentDown.multiplyScalar(0.7 + look.hairLength * 0.3)).normalize();
-      q.setFromUnitVectors(up, tilt);
-      scale.set(1, 0.7 + rand() * 0.7, 1);
-      m.compose(p, q, scale);
+      if (dir.z > 0.3 && dir.y < 0.5) continue;   // the face stays bare
+      if (dir.y < -0.55) continue;
+      pt.copy(hairSurf.point(dir, -P.headR * 0.055));
+      const lean = V(dir.x * 0.3, -0.6, -0.6 + dir.z * 0.2).normalize();
+      q.setFromUnitVectors(up, dir.clone().multiplyScalar(0.74).add(lean.multiplyScalar(0.4)).normalize());
+      q.multiply(roll.setFromAxisAngle(up, rand() * Math.PI * 2));
+      scale.set(0.8 + rand() * 0.5, 0.7 + rand() * 0.8, 0.8 + rand() * 0.5);
+      m.compose(pt, q, scale);
       inst.setMatrixAt(n++, m);
     }
     inst.count = n;

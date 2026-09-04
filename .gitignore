@@ -9,3 +9,6 @@ dist/
 coverage/
 scratch/
 scripts/smoke-*.png
+scripts/shot-*.png
+scripts/cv-*.png
+scripts/iso-*.png

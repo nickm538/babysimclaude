@@ -197,10 +197,42 @@ try {
       if (G.arms?.right?.mesh) out.arm = boundaryEdges(G.arms.right.mesh.geometry);
       const rec = G.visitors && [...G.visitors.people.values()][0];
       if (rec) out.visitor = boundaryEdges(rec.npc.body.geometry);
+      if (rec && rec.npc.headMesh) out.visitorHead = boundaryEdges(rec.npc.headMesh.geometry);
       return out;
     });
     const leaky = Object.entries(holes).filter(([, n]) => n !== 0);
     check(leaky.length === 0, `skin meshes are closed surfaces (${Object.entries(holes).map(([k, v]) => `${k}:${v}`).join(' ')} boundary edges)`);
+
+    // Clothes actually on the body. A clip predicate that rejects every triangle leaves the child
+    // naked and nothing throws, so the counts are asserted rather than eyeballed — and the garments
+    // are checked to sit outside the skin, since cloth that sinks under it looks like torn cloth.
+    const clothed = await page.evaluate(() => {
+      const G = window.__cradle, out = { tris: G.baby.garmentTris || {} };
+      // sample garment vertices and measure how far each is from the nearest body vertex along the
+      // body's own normal: with the shell derived from the body they should all be outside it
+      const body = G.baby.body.geometry, bp = body.attributes.position, bn = body.attributes.normal;
+      const worst = {};
+      for (const [name, mesh] of [['onesie', G.baby.onesie], ['diaper', G.baby.diaper]]) {
+        const gp = mesh.geometry.attributes.position;
+        let minOff = Infinity;
+        // The garment starts as a copy of the body, so vertex i below bp.count is the offset of body
+        // vertex i; anything above that index was added by the hem cut and has no counterpart.
+        if (gp.count >= bp.count) {
+          const used = new Set(mesh.geometry.index ? Array.from(mesh.geometry.index.array) : []);
+          for (const i of used) {
+            if (i >= bp.count) continue;
+            const d = (gp.getX(i) - bp.getX(i)) * bn.getX(i) + (gp.getY(i) - bp.getY(i)) * bn.getY(i) + (gp.getZ(i) - bp.getZ(i)) * bn.getZ(i);
+            if (d < minOff) minOff = d;
+          }
+        } else minOff = -1; // fewer vertices than the body: not derived from it at all
+        worst[name] = minOff === Infinity ? 0 : minOff;
+      }
+      return { ...out, worst };
+    });
+    const tris = clothed.tris || {};
+    check((tris.onesie || 0) > 200 && (tris.diaper || 0) > 100, `the baby is dressed (onesie ${tris.onesie || 0} tris, diaper ${tris.diaper || 0} tris)`);
+    const sunk = Object.entries(clothed.worst).filter(([, d]) => !(d > 0));
+    check(sunk.length === 0, `clothes sit outside the skin (${Object.entries(clothed.worst).map(([k, v]) => `${k}:${(v * 1000).toFixed(1)}mm`).join(' ')})`);
 
     // Nothing in the world is see-through except window glass, and nothing is a bare flat colour.
     // These are design rules that are easy to break by accident and impossible to spot in a diff, so
@@ -208,6 +240,9 @@ try {
     const audit = await page.evaluate(() => {
       const G = window.__cradle;
       const seen = new Set(), ghosts = [], flat = [];
+      // Report where in the graph the offender is, not just its class — "Mesh:MeshStandardMaterial"
+      // repeated twelve times says nothing about which line of which file to open.
+      const where = (o) => { const p = []; for (let n = o; n; n = n.parent) p.unshift(n.name || n.type); return p.slice(-4).join('/'); };
       G.R.scene.traverse((o) => {
         const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
         for (const m of mats) {
@@ -215,10 +250,10 @@ try {
           seen.add(m.uuid);
           if (m.userData && m.userData.glass) continue;
           if (m.isPointsMaterial || m.isLineBasicMaterial || m.isSpriteMaterial) continue;
-          if (m.transparent === true && (m.opacity ?? 1) < 0.99) ghosts.push(`${o.name || o.type}:${m.type}@${(m.opacity ?? 1).toFixed(2)}`);
+          if (m.transparent === true && (m.opacity ?? 1) < 0.99) ghosts.push(`${where(o)}@${(m.opacity ?? 1).toFixed(2)}`);
           // a material with no map, no normal map and no roughness map is a flat solid colour
           const textured = !!(m.map || m.normalMap || m.roughnessMap || m.emissiveMap || m.sheen > 0 || m.clearcoat > 0 || m.transmission > 0 || m.isShaderMaterial);
-          if (!textured && !m.isMeshBasicMaterial) flat.push(`${o.name || o.type}:${m.type}`);
+          if (!textured && !m.isMeshBasicMaterial) flat.push(`${where(o)}#${m.color?.getHexString?.() ?? '?'}`);
         }
       });
       return { ghosts: ghosts.slice(0, 8), ghostCount: ghosts.length, flat: flat.slice(0, 8), flatCount: flat.length, materials: seen.size };

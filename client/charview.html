@@ -1,0 +1,74 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Cradle character viewer</title>
+<style>html,body{margin:0;height:100%;background:#20242b;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
+</head><body><script type="module">
+// A standalone turntable for the character meshes. Not part of the game — it exists so a build can be
+// looked at straight on, at rest, without the simulation moving the model out of frame first.
+import * as THREE from 'three';
+import { Adult } from './src/characters/adult.js';
+import { buildBabyBody } from './src/characters/babyMesh.js';
+import { buildFace } from './src/characters/babyFace.js';
+import { makeSkinMaterial } from './src/characters/skinMaterial.js';
+import { fabricTexture, clothMaterial } from './src/engine/textures.js';
+
+const q = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x2a2f38);
+const cam = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.02, 40);
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x40382e, 1.1));
+const key = new THREE.DirectionalLight(0xfff2e0, 2.6); key.position.set(2.2, 3.2, 2.6); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); key.shadow.camera.left = -2; key.shadow.camera.right = 2; key.shadow.camera.top = 3; key.shadow.camera.bottom = -1;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xbfd4ff, 0.8); fill.position.set(-2.4, 1.4, 1.6); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xffd9b0, 1.4); rim.position.set(-0.6, 2.0, -3.0); scene.add(rim);
+const floor = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.04, 48), new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.95 }));
+floor.position.y = -0.02; floor.receiveShadow = true; scene.add(floor);
+
+let target = new THREE.Vector3(0, 0.8, 0), dist = 2.4;
+const which = q.get('who') || 'adult';
+if (which === 'adult') {
+  const a = new Adult(scene, { id: q.get('id') || 'Rosa', relation: q.get('rel') || 'friend', mobile: false, lowSpec: false });
+  a.root.position.set(0, 0, 0);
+  if (q.has('nosss')) a.skin.userData.uniforms.uSSS.value = 0;
+  if (q.has('nohair')) { if (a.hair) a.hair.visible = false; if (a.hairCap) a.hairCap.visible = false; if (a.hairFall) a.hairFall.visible = false; }
+  if (q.has('noface')) a.face.visible = false;
+  target.set(0, a.layout.totalH * 0.55, 0); dist = a.layout.totalH * 1.6;
+  if (q.get('head')) { target.set(0, a.layout.J.head.y + a.layout.P.headR * 0.9, 0); dist = a.layout.P.headR * 6; }
+  window.__view = { a };
+} else {
+  const days = Number(q.get('days') || 700);
+  let skin = makeSkinMaterial({ skinTone: '#f0c9ae', sss: q.has('nosss') ? 0 : 0.4, blush: q.has('noblush') ? 0 : 0.16 });
+  if (q.has('plain')) skin = new THREE.MeshStandardMaterial({ color: '#f0c9ae', roughness: 0.62, metalness: 0 });
+  if (q.has('normals')) skin = new THREE.MeshNormalMaterial();
+  if (skin.userData.uniforms) {
+    if (q.has('nodetail')) { skin.userData.uniforms.uDetailScale.value = 0; skin.userData.uniforms.uMicroScale.value = 0; }
+    if (q.has('nosheen')) { skin.sheen = 0; skin.clearcoat = 0; }
+    if (q.has('noblush2')) skin.userData.uniforms.uBlush.value = 0;
+  }
+  const cloth = clothMaterial(fabricTexture({ color: '#bfe6d2', repeat: 14, weave: 3 }), { sheen: 0.8, sheenTint: 0.85 });
+  const dia = clothMaterial(fabricTexture({ color: '#fbfaf7', repeat: 22, weave: 2, seed: 6 }), { sheen: 0.25, sheenTint: 0.6, extra: { roughness: 0.92 } });
+  const b = buildBabyBody({ days, skinMat: skin, clothMat: cloth, diaperMat: dia, res: 96 });
+  if (skin.userData.uniforms) { skin.userData.uniforms.uHeadY.value = b.layout.headCenter.y; skin.userData.uniforms.uHeadR.value = b.layout.P.headR; }   // same placement the game does
+  b.body.add(b.onesie); b.body.add(b.diaper);
+  if (!q.has('noface')) buildFace({ headBone: b.bones.head, layout: b.layout, surface: b.surface, skinMat: skin, days, appearance: { skinTone: '#f0c9ae', hairColor: '#5a3a22', hairAmount: 0.7, eyeColor: '#5b7fa6' } });
+  if (q.has('nohair')) b.bones.head.traverse((o) => { if (o.isInstancedMesh || o.geometry?.type === 'SphereGeometry') o.visible = false; });
+  const g = new THREE.Group(); g.add(b.body); scene.add(g);
+  target.set(0, b.layout.totalH * 0.62, 0); dist = b.layout.totalH * 1.7;
+  if (q.get('head')) { target.set(0, b.layout.headCenter.y, 0); dist = b.layout.P.headR * 6.5; }
+  window.__view = { b };
+}
+const az = Number(q.get('az') || 0);
+function frame() {
+  cam.position.set(target.x + Math.sin(az) * dist, target.y + dist * 0.12, target.z + Math.cos(az) * dist);
+  cam.lookAt(target);
+  renderer.render(scene, cam);
+}
+frame();
+window.__ready = true;
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); frame(); });
+setInterval(frame, 100);
+</script></body></html>
