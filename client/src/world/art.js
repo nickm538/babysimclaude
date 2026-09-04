@@ -183,15 +183,29 @@ export function buildArt(scene, { name = 'Baby', seed = null } = {}) {
   const group = new THREE.Group(); group.name = 'art'; scene.add(group);
   const place = (obj, x, y, z, ry = 0) => { obj.position.set(x, y, z); obj.rotation.y = ry; group.add(obj); return obj; };
 
-  // --- three generative pieces above the living-room console, all facing into the room (+z)
-  place(framed(flowFieldArt(S), 0.46, 0.6), -2.35, 1.98, -4.88);
-  place(framed(landscapeArt(S + 5), 0.7, 0.5), -1.0, 2.05, -4.88);
-  place(framed(voronoiArt(S + 11), 0.44, 0.44), 0.42, 1.94, -4.88);
+  // A gallery wall, hung the way people actually hang one: a big anchor piece with smaller work
+  // clustered round it, at eye level rather than up near the ceiling. Three lonely squares floating
+  // high on a wall read as placeholder art, which is what this was.
+  place(framed(landscapeArt(S + 5), 0.86, 0.62), -1.3, 1.62, -4.88);
+  place(framed(flowFieldArt(S), 0.4, 0.52), -2.35, 1.7, -4.88);
+  place(framed(voronoiArt(S + 11), 0.36, 0.36), -2.35, 1.16, -4.88);
+  place(framed(flowFieldArt(S + 23), 0.3, 0.4), -0.42, 1.82, -4.88);
+  place(framed(voronoiArt(S + 31), 0.3, 0.3), -0.42, 1.36, -4.88);
+  place(framed(landscapeArt(S + 41), 0.44, 0.32), 0.28, 1.6, -4.88);
+  // and a small shelf below it with a couple of things on it, so the wall has depth
+  const ledge = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.035, 0.12), FRAME_W);
+  ledge.castShadow = ledge.receiveShadow = true;
+  place(ledge, -1.3, 1.06, -4.83);
+  for (const [x, r, h, c] of [[-1.75, 0.045, 0.13, 0xb5714e], [-1.55, 0.032, 0.09, 0xdfe3e6], [-0.92, 0.038, 0.16, 0x8fbfa8]]) {
+    const pot = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.82, h, 16), new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.7, sheen: 0.2 }));
+    pot.castShadow = true; place(pot, x, 1.08 + h / 2, -4.8);
+  }
 
   // --- nursery growth chart on the north nursery wall
   const marks = [];
   const chartTex = texFromCanvas(growthCanvas(name, marks));
-  const chart = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 1.35), new THREE.MeshStandardMaterial({ map: chartTex, roughness: 0.85 }));
+  const chart = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.35, 0.004), new THREE.MeshStandardMaterial({ map: chartTex, roughness: 0.85 }));
+  chart.castShadow = chart.receiveShadow = true;
   place(chart, 5.45, 0.95, -4.885);
   const rail = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.03, 0.02), FRAME_W); place(rail, 5.45, 1.64, -4.88);
 

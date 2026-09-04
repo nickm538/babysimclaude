@@ -94,14 +94,33 @@ export function buildHouse(scene, opts = {}) {
   // Window glass is the one legitimately see-through surface in the house, and it is done one way, not
   // two: transmission alone on hardware that can render it (opacity on top of transmission made the
   // pane look doubly ghosted), and a reflective, faintly tinted pane on mobile.
+  // Tagged so the smoke test's transparency audit can tell the one legitimate see-through surface in
+  // the house apart from an accident.
   const glassMat = mobile
     ? new THREE.MeshPhysicalMaterial({ color: 0xcfe2f3, roughness: 0.04, metalness: 0.0, transparent: true, opacity: 0.35, envMapIntensity: 1.6, clearcoat: 1 })
-    : new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 0.96, roughness: 0.04, thickness: 0.006, ior: 1.5, envMapIntensity: 1.2 });
+    : new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 0.96, roughness: 0.04, thickness: 0.006, ior: 1.5, envMapIntensity: 1.2 })
+  glassMat.userData.glass = true;
   const frameMat = matte({ color: 0xffffff, roughness: 0.5 });
   const mkWindow = (cx, cy, cz, w, h, rotY) => {
     const grp = new THREE.Group(); grp.position.set(cx, cy, cz); grp.rotation.y = rotY;
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h), glassMat); grp.add(glass);
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.006), glassMat); grp.add(glass);
     const fr = new THREE.Mesh(new THREE.BoxGeometry(w + 0.12, h + 0.12, 0.08), frameMat); fr.position.z = 0.05; grp.add(fr);
+    // The reveal: the thickness of the wall showing round the opening, plus a sill deep enough to
+    // put something on. Without it the glass looks painted onto a flat surface.
+    for (const [ox, oy, rw, rh] of [[0, (h + 0.11) / 2, w + 0.22, 0.11], [0, -(h + 0.11) / 2, w + 0.22, 0.11], [(w + 0.11) / 2, 0, 0.11, h], [-(w + 0.11) / 2, 0, 0.11, h]]) {
+      const r = new THREE.Mesh(new THREE.BoxGeometry(rw, rh, 0.2), frameMat);
+      r.position.set(ox, oy, -0.02); r.castShadow = r.receiveShadow = true; grp.add(r);
+    }
+    const sill = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.05, 0.26), frameMat);
+    sill.position.set(0, -(h / 2) - 0.09, 0.09); sill.castShadow = sill.receiveShadow = true; grp.add(sill);
+    // glazing bars: a real window is divided, and the shadows they throw across the floor are half
+    // of what makes a sun patch look like sunlight
+    for (let i = 1; i < 3; i++) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(0.022, h, 0.05), frameMat);
+      b.position.set(-w / 2 + (w * i) / 3, 0, 0.02); b.castShadow = true; grp.add(b);
+    }
+    const cross = new THREE.Mesh(new THREE.BoxGeometry(w, 0.022, 0.05), frameMat);
+    cross.position.set(0, 0, 0.02); cross.castShadow = true; grp.add(cross);
     const inner = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.12), new THREE.MeshBasicMaterial({ color: 0x000000 })); inner.visible = false; grp.add(inner);
     for (const [ox, oy, ww, hh] of [[0, 0, 0.04, h], [0, 0, w, 0.04]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(ww, hh, 0.06), frameMat); b.position.set(ox, oy, 0.03); grp.add(b); }
     // sky card behind

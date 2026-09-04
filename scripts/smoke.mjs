@@ -202,6 +202,30 @@ try {
     const leaky = Object.entries(holes).filter(([, n]) => n !== 0);
     check(leaky.length === 0, `skin meshes are closed surfaces (${Object.entries(holes).map(([k, v]) => `${k}:${v}`).join(' ')} boundary edges)`);
 
+    // Nothing in the world is see-through except window glass, and nothing is a bare flat colour.
+    // These are design rules that are easy to break by accident and impossible to spot in a diff, so
+    // they are audited on the live scene instead of trusted.
+    const audit = await page.evaluate(() => {
+      const G = window.__cradle;
+      const seen = new Set(), ghosts = [], flat = [];
+      G.R.scene.traverse((o) => {
+        const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+        for (const m of mats) {
+          if (!m || seen.has(m.uuid)) continue;
+          seen.add(m.uuid);
+          if (m.userData && m.userData.glass) continue;
+          if (m.isPointsMaterial || m.isLineBasicMaterial || m.isSpriteMaterial) continue;
+          if (m.transparent === true && (m.opacity ?? 1) < 0.99) ghosts.push(`${o.name || o.type}:${m.type}@${(m.opacity ?? 1).toFixed(2)}`);
+          // a material with no map, no normal map and no roughness map is a flat solid colour
+          const textured = !!(m.map || m.normalMap || m.roughnessMap || m.emissiveMap || m.sheen > 0 || m.clearcoat > 0 || m.transmission > 0 || m.isShaderMaterial);
+          if (!textured && !m.isMeshBasicMaterial) flat.push(`${o.name || o.type}:${m.type}`);
+        }
+      });
+      return { ghosts: ghosts.slice(0, 8), ghostCount: ghosts.length, flat: flat.slice(0, 8), flatCount: flat.length, materials: seen.size };
+    });
+    check(audit.ghostCount === 0, `nothing is see-through but the windows (${audit.materials} materials, ${audit.ghostCount} translucent${audit.ghostCount ? ': ' + audit.ghosts.join(', ') : ''})`);
+    check(audit.flatCount === 0, `nothing is a bare flat colour (${audit.flatCount} untextured${audit.flatCount ? ': ' + audit.flat.join(', ') : ''})`);
+
     // age the baby into a toddler through the debug endpoint and make sure the model rebuilds without errors
     await j('POST', `/api/games/${id}/actions`, { id: 'put_down', params: { location: 'play_mat', position: 'sitting' } }, u.token);
     const aged = await j('POST', `/api/games/${id}/debug/advance`, { days: 730 }, u.token);

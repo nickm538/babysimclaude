@@ -106,7 +106,9 @@ export class Renderer {
       const l = new THREE.SpotLight(0xfff1dc, 0, 16, 0.85, 0.35, 1.1);
       l.position.set(...w.pos);
       l.target.position.set(...w.target);
-      l.castShadow = !this.software;
+      // Kept on even in software: the sun patch is the single largest contributor to the room
+      // reading as a real space, and one 512 map is affordable where the post chain is not.
+      l.castShadow = true;
       const r = this.software ? 512 : this.isMobile ? 1024 : 2048;
       l.shadow.mapSize.set(r, r);
       l.shadow.camera.near = 0.4; l.shadow.camera.far = 16;
@@ -151,7 +153,7 @@ export class Renderer {
       const k = up ? Math.pow(facing, 0.75) * (0.25 + elev * 0.9) : 0;
       sh.light.intensity = THREE.MathUtils.lerp(sh.light.intensity, k * 9, 0.15);
       sh.light.color.copy(this.sun.color);
-      sh.light.castShadow = !this.software && sh.light.intensity > 0.15;
+      sh.light.castShadow = sh.light.intensity > 0.15;
     }
     this.windowFill.color.copy(DAY_SKY).lerp(new THREE.Color(0xffb27a), warm * 0.6);
     // sky gradient: zenith and horizon, warmed at dawn/dusk, deep blue at night

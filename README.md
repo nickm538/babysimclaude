@@ -54,6 +54,13 @@ tantrum and mistake is simulated on the server and saved to a database, so the b
   skirting and coving, procedural PBR textures with roughness maps and sheen on every fabric, day/night lighting with a 4096² shadow
   map fitted to the room, and a **GTAO + SMAA post-processing pipeline** for contact occlusion — with an adaptive quality controller
   that drops it on hardware that cannot hold a frame rate, and skips it outright on software renderers.
+- **A room that looks lived in**: profiled skirting and coving, windows with reveals, deep sills and
+  glazing bars, a gallery wall hung at eye level with a shelf under it, a nursing chair with curved
+  rockers and a spindle back, and the clutter a house with a baby actually has — a laundry basket
+  with a heap in it, muslins over the sofa arm, a mug and a book left on the floor. **Sunlight comes
+  through the windows**: each one has a shadow-casting light just inside the glass aimed along the
+  real sun direction, so a bright patch of floor with the glazing bars printed across it swings
+  through the room over the day and picks out every leg and edge it crosses.
 - **Procedural people, no downloaded assets**: the baby, the visitors the social layer sends round, and your own arms all come from one
   pipeline — a metaball field polygonised with marching cubes, Taubin-smoothed so no grid shows, skinned to a skeleton. The skin
   shader samples two scales of relief triplanar (the meshes have no UVs), scatters light by screen-space curvature so ears and

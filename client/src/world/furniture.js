@@ -44,7 +44,7 @@ export function buildFurniture(g, colliders, interactables, opts) {
   table.add(box(1.1, 0.04, 0.55, wood, 0, 0.42, 0));
   for (const [x, z] of [[-0.5, -0.22], [0.5, -0.22], [-0.5, 0.22], [0.5, 0.22]]) table.add(cyl(0.02, 0.02, 0.42, darkWood, x, 0.21, z));
   const tablet = box(0.24, 0.012, 0.17, matte({ color: 0x1a1a1f, roughness: 0.3, metalness: 0.4 }), 0.2, 0.45, 0.05); tablet.rotation.y = 0.3;
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.21, 0.14), new THREE.MeshPhysicalMaterial({ color: 0x1b2a44, emissive: 0x3d6fb8, emissiveIntensity: 0.55, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.3 })); screen.rotation.x = -Math.PI / 2; screen.position.y = 0.007; tablet.add(screen);
+  const screen = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.003, 0.14), new THREE.MeshPhysicalMaterial({ color: 0x1b2a44, emissive: 0x3d6fb8, emissiveIntensity: 0.55, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.3 })); screen.position.y = 0.008; tablet.add(screen);
   table.add(tablet); tablet.userData.interact = { id: 'tablet', label: 'Tablet' }; interactables.push(tablet);
   const mug = cyl(0.04, 0.035, 0.09, white, -0.35, 0.485, 0.1); table.add(mug);
   F.table = add(table, { min: { x: -0.1, z: -0.1 }, max: { x: 1.1, z: 0.5 } });
@@ -53,7 +53,7 @@ export function buildFurniture(g, colliders, interactables, opts) {
   const tvc = new THREE.Group(); tvc.position.set(-1, 0, -4.55);
   tvc.add(box(1.6, 0.5, 0.42, darkWood, 0, 0.25, 0));
   const tv = box(1.3, 0.75, 0.04, matte({ color: 0x0d0d10, roughness: 0.25, metalness: 0.5 }), 0, 0.95, 0.05);
-  const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(1.24, 0.69), new THREE.MeshPhysicalMaterial({ color: 0x07090e, roughness: 0.08, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.6 })); tvScreen.position.z = 0.021; tv.add(tvScreen); tvc.add(tv);
+  const tvScreen = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.69, 0.004), new THREE.MeshPhysicalMaterial({ color: 0x07090e, roughness: 0.08, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.6 })); tvScreen.position.z = 0.022; tv.add(tvScreen); tvc.add(tv);
   F.tv = add(tvc, { min: { x: -1.85, z: -5 }, max: { x: -0.15, z: -4.3 } });
 
   // bookshelf
@@ -71,8 +71,24 @@ export function buildFurniture(g, colliders, interactables, opts) {
   // plant
   const plant = new THREE.Group(); plant.position.set(5.4, 0, 4.4);
   plant.add(cyl(0.18, 0.14, 0.32, matte({ color: 0xb5714e, roughness: 0.9 }), 0, 0.16, 0));
-  const leafMat = matte({ color: 0x3f7a3a, roughness: 0.7, side: THREE.DoubleSide });
-  for (let i = 0; i < 9; i++) { const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.5, 1, 4), leafMat); const p = leaf.geometry.attributes.position; for (let k = 0; k < p.count; k++) p.setZ(k, Math.pow(p.getY(k) + 0.25, 2) * 0.6); leaf.geometry.computeVertexNormals(); leaf.position.y = 0.5; leaf.rotation.set(-0.3 - rand() * 0.4, i * 0.7, 0); leaf.castShadow = true; plant.add(leaf); }
+  const leafMat = matte({ color: 0x3f7a3a, roughness: 0.55, sheen: 0.4, sheenColor: new THREE.Color(0xcfe8b0) });
+  // Leaves with thickness and a raised midrib, arching under their own weight. A flat plane with a
+  // texture on it is the classic giveaway; a leaf you can see the edge of is not.
+  for (let i = 0; i < 11; i++) {
+    const geo = new THREE.BoxGeometry(0.15, 0.5, 0.006, 3, 7, 1);
+    const p = geo.attributes.position;
+    for (let k = 0; k < p.count; k++) {
+      const x = p.getX(k), y = p.getY(k);
+      const t = (y + 0.25) / 0.5;
+      p.setX(k, x * (0.35 + Math.sin(t * Math.PI) * 0.95));            // taper to a point at both ends
+      p.setZ(k, p.getZ(k) + t * t * 0.28 + (1 - Math.abs(x) / 0.08) * 0.012);  // arch, plus a midrib
+    }
+    geo.computeVertexNormals();
+    const leaf = new THREE.Mesh(geo, leafMat);
+    leaf.position.y = 0.48 + rand() * 0.06;
+    leaf.rotation.set(-0.25 - rand() * 0.5, i * 0.57 + rand() * 0.2, (rand() - 0.5) * 0.3);
+    leaf.castShadow = leaf.receiveShadow = true; plant.add(leaf);
+  }
   F.plant = add(plant, { min: { x: 5.2, z: 4.2 }, max: { x: 5.6, z: 4.6 } });
 
   // --- nursery nook ---
@@ -105,7 +121,7 @@ export function buildFurniture(g, colliders, interactables, opts) {
   for (let i = 0; i < 2; i++) ct.add(cyl(0.015, 0.015, 0.08, chrome, 0, 0.25 + i * 0.36, 0.33, 8).rotateX(Math.PI / 2));
   const wipes = box(0.18, 0.08, 0.1, matte({ color: 0x6fbbe0, roughness: 0.5 }), 0.35, 0.98, -0.15); ct.add(wipes);
   const tub = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.28, 0.16, 24, 1, true), matte({ color: 0xbfe3ef, roughness: 0.3, side: THREE.DoubleSide })); tub.scale.z = 0.6; tub.position.y = 1.0; tub.visible = false; ct.add(tub); F.tub = tub;
-  const water = new THREE.Mesh(new THREE.CircleGeometry(0.32, 32), new THREE.MeshPhysicalMaterial({ color: 0x9cd3ea, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.4, sheen: 0.2, sheenColor: new THREE.Color(0xffffff) })); water.rotation.x = -Math.PI / 2; water.scale.y = 0.6; water.position.y = 1.03; water.visible = false; ct.add(water); F.water = water;
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.29, 0.06, 32, 1), new THREE.MeshPhysicalMaterial({ color: 0x9cd3ea, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.4, sheen: 0.2, sheenColor: new THREE.Color(0xffffff) })); water.scale.z = 0.6; water.position.y = 1.0; water.visible = false; ct.add(water); F.water = water;
   F.changingTable = add(ct, { min: { x: 4.1, z: -1.5 }, max: { x: 5.1, z: -0.9 } }, { id: 'changing_table', label: 'Changing table' });
   // dresser
   const dresser = new THREE.Group(); dresser.position.set(5.5, 0, 0.8);
@@ -144,7 +160,10 @@ export function buildFurniture(g, colliders, interactables, opts) {
   const nl = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 12), matte({ color: 0xffd9a8, emissive: 0xffb070, emissiveIntensity: 0.6 })); nl.position.set(5.86, 0.35, -3.0); g.add(nl); F.nightlightMesh = nl;
 
   // play mat + toys
-  const mat = new THREE.Mesh(new THREE.CircleGeometry(0.95, 32), stdMaterial(fabricTexture({ color: '#9ecbb5', repeat: 5, weave: 5 }), { roughness: 1 })); mat.rotation.x = -Math.PI / 2; mat.position.set(3.0, 0.02, 1.5); mat.receiveShadow = true; mat.userData.interact = { id: 'play_mat', label: 'Play mat' }; interactables.push(mat); g.add(mat); F.playMat = mat;
+  // A foam play mat is 2cm of padding you can see the edge of, not a decal on the floorboards.
+  const matGeo = new THREE.CylinderGeometry(0.95, 0.93, 0.022, 40, 1);
+  const mat = new THREE.Mesh(matGeo, clothMaterial(fabricTexture({ color: '#9ecbb5', repeat: 5, weave: 5 }), { sheen: 0.35, extra: { roughness: 1 } }));
+  mat.position.set(3.0, 0.012, 1.5); mat.receiveShadow = true; mat.castShadow = true; mat.userData.interact = { id: 'play_mat', label: 'Play mat' }; interactables.push(mat); g.add(mat); F.playMat = mat;
   F.toys = new THREE.Group(); F.toys.position.set(3.0, 0, 1.5); g.add(F.toys);
   const toyMats = [0xff6f61, 0xffd166, 0x06d6a0, 0x118ab2, 0x8338ec];
   for (let i = 0; i < 4; i++) { const b = box(0.1, 0.1, 0.1, matte({ color: toyMats[i], roughness: 0.6 }), -0.5 + i * 0.13, 0.05, 0.55); b.rotation.y = i * 0.5; F.toys.add(b); }
