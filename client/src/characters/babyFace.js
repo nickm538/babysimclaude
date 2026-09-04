@@ -1,0 +1,247 @@
+// Face rig attached to the head bone: eyes with iris/pupil, eyelids that blink and squint, brows, ears,
+// mouth cavity/tongue/lips (revealed by the cry/open morphs) and instanced hair strands.
+import * as THREE from 'three';
+import { skinMicroTexture, matte } from '../engine/textures.js';
+
+// Hair is not a matte solid: the highlight runs along the strand, not across it, and shifts as the
+// head turns. Anisotropy is that behaviour. Shared by scalp hair, brows and lashes so they match.
+export function hairMaterial(color, roughness = 0.5) {
+  return new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(color), roughness, metalness: 0.02,
+    anisotropy: 0.7, anisotropyRotation: Math.PI / 2,
+    sheen: 0.25, sheenRoughness: 0.5, sheenColor: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.4),
+    envMapIntensity: 0.6,
+  });
+}
+
+
+// A head of hair as one closed volume, shared by the baby and the adult visitors.
+//
+// Its radius is a function of direction: outside the skin over the scalp, tucked inside it over the
+// face, and swelling down and back by however long the hair is. A radius function is star-shaped by
+// construction, so the surface can neither self-intersect nor leave a cut edge — the hairline is
+// simply where the shell crosses the skin, so there is nothing to trim and no seam to hide. A cap
+// plus a separate falling sheet, which is what this replaced, meant two objects that had to keep
+// agreeing with each other, and the sheet showed its edges as hard black bars beside the face.
+//
+// `stand` is how far the shell stands off the scalp — negative for a newborn's wisp, which leaves the
+// shell inside the skin and lets the strands alone do the work. `drop` is the fall behind and below.
+export function hairShellGeometry({ R, stand = 0.08, drop = 0, seed = 1, segments = 48, hairline = 0.62 }) {
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const geo = new THREE.SphereGeometry(1, segments, Math.round(segments * 0.72));
+  const p = geo.attributes.position, d = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    d.fromBufferAttribute(p, i).normalize();
+    const scalp = 1 - clamp((d.z - 0.14) * 2.6) * clamp((hairline - d.y) * 1.9);   // bare over the face
+    let r = R * (0.9 + scalp * (0.1 + stand));
+    const back = clamp(-d.z * 1.1 + 0.4), band = Math.exp(-Math.pow((d.y + 0.42) / 0.52, 2));
+    r += drop * back * band * scalp;
+    // a slow wave, so it is a head of hair rather than a moulding
+    r *= 1 + Math.sin(d.x * 7.5 + seed) * 0.022 * scalp + Math.sin(d.y * 9 + d.z * 4) * 0.016 * scalp;
+    p.setXYZ(i, d.x * r, d.y * r, d.z * r);
+  }
+  p.needsUpdate = true; geo.computeVertexNormals();
+  return geo;
+}
+
+export function irisTexture(color) {
+  const c = document.createElement('canvas'); c.width = c.height = 256; const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(128, 128, 20, 128, 128, 128);
+  const col = new THREE.Color(color), light = col.clone().lerp(new THREE.Color(0xffffff), 0.35), dark = col.clone().multiplyScalar(0.35);
+  g.addColorStop(0, `#${dark.getHexString()}`); g.addColorStop(0.35, `#${col.getHexString()}`); g.addColorStop(0.7, `#${light.getHexString()}`); g.addColorStop(0.9, `#${col.getHexString()}`); g.addColorStop(1, '#1a1410');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 256);
+  // fibres
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.2;
+  for (let i = 0; i < 90; i++) { const a = (i / 90) * Math.PI * 2 + Math.random() * 0.05; ctx.beginPath(); ctx.moveTo(128 + Math.cos(a) * 30, 128 + Math.sin(a) * 30); ctx.lineTo(128 + Math.cos(a + 0.02) * 118, 128 + Math.sin(a + 0.02) * 118); ctx.stroke(); }
+  ctx.fillStyle = '#050403'; ctx.beginPath(); ctx.arc(128, 128, 44, 0, Math.PI * 2); ctx.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+export function buildFace({ headBone, layout, skinMat, appearance, days, surface }) {
+  const P = layout.P, R = P.headR;
+  const hc = layout.headCenter.clone().sub(layout.J.head); // head center relative to head bone
+  // place features on the measured skin surface (body-space direction from the head centre -> head-bone-local point)
+  const onSurface = (dir, offset = 0) => surface.point(dir, offset).sub(layout.J.head);
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const face = new THREE.Group(); face.name = 'face';
+  headBone.add(face);
+  const F = { group: face, eyes: [], lids: [], brows: [], gaze: new THREE.Vector3(0, 0, 1), blink: 0, squint: 0, browRaise: 0, browFurrow: 0 };
+
+  const eyeR = R * 0.145;   // a real eyeball is smaller than it looks; the opening does the work
+  // The eye is one solid object. A see-through cornea sphere over an iris reads as a glass marble
+  // with something floating inside it; a real eye is an opaque ball with a wet film on top, and the
+  // corneal bulge is a shape, not a transparency. So: an opaque sclera with a clearcoat for the tear
+  // film, an opaque painted iris cap, and the bulge done by scaling the cap forward.
+  const scleraMat = new THREE.MeshPhysicalMaterial({
+    color: 0xf3f4f6, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 0.9,
+    sheen: 0.15, sheenColor: new THREE.Color(0xffd9d0), // the faint pink of the vessels at the edges
+  });
+  const irisMat = new THREE.MeshPhysicalMaterial({ map: irisTexture(appearance.eyeColor || '#4a3020'), roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.1 });
+  for (const sx of [-1, 1]) {
+    const socket = new THREE.Group();
+    socket.position.copy(onSurface(V(sx * 0.42, 0.05, 1), -eyeR * 0.62));
+    const eye = new THREE.Group();
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 32, 24), scleraMat); ball.castShadow = false; eye.add(ball);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 1.012, 32, 16, 0, Math.PI * 2, 0, 0.62), irisMat);
+    iris.rotation.x = Math.PI / 2; iris.scale.z = 1.12; eye.add(iris);
+    socket.add(eye);
+    // lids: sphere caps slightly larger than the eye, skin material; upper rotates down to blink
+    // Lids are caps over the eyeball; how far they are rotated back is the whole difference between
+    // an open eye and a suspicious squint. A baby's palpebral fissure is wide and round.
+    const lidGeo = new THREE.SphereGeometry(eyeR * 1.14, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    const upper = new THREE.Mesh(lidGeo, skinMat); upper.rotation.x = -0.62; upper.scale.set(1.06, 1, 1.06); socket.add(upper);
+    const lower = new THREE.Mesh(lidGeo, skinMat); lower.rotation.x = Math.PI + 0.66; lower.scale.set(1.06, 1, 1.06); socket.add(lower);
+    // lashes: thin dark torus arc on the upper lid edge
+    const lash = new THREE.Mesh(new THREE.TorusGeometry(eyeR * 1.1, eyeR * 0.028, 6, 22, Math.PI * 0.8), hairMaterial('#2a1a12', 0.85));
+    lash.position.y = eyeR * 0.06; lash.rotation.set(Math.PI * 0.5, 0, Math.PI * 0.1); lash.scale.set(1, 1, 0.55); upper.add(lash);
+    face.add(socket);
+    F.eyes.push({ socket, eye, upper, lower, sx });
+    // brow
+    // A brow is a short, shallow, slightly angled smudge sitting on the ridge — wide, barely curved,
+    // and pressed flat against the skin. A big open arc standing off the face reads as a drawn-on
+    // parenthesis, which is what this used to be.
+    const brow = new THREE.Mesh(new THREE.TorusGeometry(R * 0.15, R * 0.019, 6, 18, Math.PI * 0.52), hairMaterial(appearance.hairColor || '#4a2f1d', 0.92));
+    brow.position.copy(onSurface(V(sx * 0.4, 0.26, 1), -R * 0.005));
+    brow.rotation.set(0.12, sx * 0.22, Math.PI * 0.74 + sx * 0.06);
+    brow.scale.set(1, 0.9, 0.22);
+    face.add(brow); F.brows.push({ mesh: brow, sx, y0: brow.position.y, rz0: brow.rotation.z });
+    // ear
+    // An ear is a curled rim around a hollow, with a lobe. Three pieces, all in skin, all attached
+    // to the head — an ellipsoid stuck on the side is the single most doll-like thing a face can do.
+    const earG = new THREE.Group();
+    earG.position.copy(onSurface(V(sx, -0.02, -0.06), R * 0.015));
+    earG.rotation.set(0, sx * 0.42, sx * -0.12);
+    const helix = new THREE.Mesh(new THREE.TorusGeometry(R * 0.115, R * 0.028, 8, 22, Math.PI * 1.45), skinMat);
+    helix.rotation.set(0, Math.PI / 2, Math.PI * 0.32); helix.scale.set(1, 1.18, 0.55); earG.add(helix);
+    const bowl = new THREE.Mesh(new THREE.SphereGeometry(R * 0.085, 16, 12), skinMat);
+    bowl.scale.set(0.42, 1.0, 0.72); bowl.position.set(-sx * R * 0.012, -R * 0.012, 0); earG.add(bowl);
+    const lobe = new THREE.Mesh(new THREE.SphereGeometry(R * 0.042, 12, 10), skinMat);
+    lobe.scale.set(0.55, 0.85, 0.8); lobe.position.set(0, -R * 0.125, R * 0.006); earG.add(lobe);
+    face.add(earG);
+  }
+  // mouth: cavity (dark) + tongue + lips
+  const mouthSurf = onSurface(V(0, -0.45, 1), 0);
+  const mouthPos = onSurface(V(0, -0.45, 1), -R * 0.34);
+  const cavity = new THREE.Mesh(new THREE.SphereGeometry(R * 0.2, 20, 14), new THREE.MeshPhysicalMaterial({ color: 0x4a1418, roughness: 0.5, clearcoat: 0.7, clearcoatRoughness: 0.35 }));
+  cavity.position.copy(mouthPos); cavity.scale.set(1.2, 0.8, 0.9); face.add(cavity);
+  const tongue = new THREE.Mesh(new THREE.SphereGeometry(R * 0.12, 16, 12), new THREE.MeshPhysicalMaterial({ color: 0xd76a72, roughness: 0.4, clearcoat: 0.75, clearcoatRoughness: 0.25, sheen: 0.3, sheenColor: new THREE.Color(0xff9a8a) }));
+  tongue.position.set(mouthPos.x, mouthPos.y - R * 0.06, mouthPos.z - R * 0.02); tongue.scale.set(1.1, 0.5, 1.2); face.add(tongue);
+  const lipMat = new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(appearance.skinTone || '#f0c9ae').lerp(new THREE.Color(0xd66c68), 0.55),
+    roughness: 0.38, clearcoat: 0.55, clearcoatRoughness: 0.3,
+    sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xff9a8a), // lips scatter red at the rim
+    normalMap: skinMicroTexture().normalMap || skinMicroTexture().map, normalScale: new THREE.Vector2(0.35, 0.35),
+  });
+  const upperLip = new THREE.Mesh(new THREE.TorusGeometry(R * 0.155, R * 0.032, 8, 24, Math.PI), lipMat);
+  upperLip.position.copy(mouthSurf).add(V(0, R * 0.018, -R * 0.004)); upperLip.rotation.set(-0.18, 0, 0); upperLip.scale.set(1.05, 0.42, 0.42); face.add(upperLip);
+  // the lower lip is fuller and sits slightly proud — that asymmetry is most of what reads as a mouth
+  const lowerLip = new THREE.Mesh(new THREE.TorusGeometry(R * 0.148, R * 0.042, 8, 24, Math.PI), lipMat);
+  lowerLip.position.copy(mouthSurf).add(V(0, -R * 0.022, R * 0.002)); lowerLip.rotation.set(0.22, 0, Math.PI); lowerLip.scale.set(1.02, 0.5, 0.5); face.add(lowerLip);
+  F.mouth = { cavity, tongue, upperLip, lowerLip, y0: lowerLip.position.y, uy0: upperLip.position.y, R };
+  // pacifier (hidden)
+  const paci = new THREE.Group(); paci.position.copy(mouthSurf).add(V(0, 0, R * 0.05)); paci.visible = false;
+  paci.add(new THREE.Mesh(new THREE.TorusGeometry(R * 0.2, R * 0.03, 10, 28), matte({ color: 0x8fd3f4, roughness: 0.4, clearcoat: 0.55, clearcoatRoughness: 0.25 })));
+  const shield = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.26, R * 0.26, R * 0.05, 28), matte({ color: 0x8fd3f4, roughness: 0.4, clearcoat: 0.55, clearcoatRoughness: 0.25 })); shield.rotation.x = Math.PI / 2; paci.add(shield);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(R * 0.12, R * 0.03, 10, 24), matte({ color: 0xf4f6f8, roughness: 0.45, clearcoat: 0.5 })); ring.position.z = R * 0.1; ring.rotation.x = Math.PI / 2; paci.add(ring);
+  face.add(paci); F.pacifier = paci;
+
+  // hair: instanced tapered strands on the scalp; amount and length grow with age
+  const amount = Math.max(0.05, Math.min(1, Number(appearance.hairAmount ?? 0.5) || 0.5));
+  const count = Math.floor(200 + amount * 1500 + Math.min(1, days / 700) * 3600);
+  // Short and thick beats long and thin: strands this size merge into a mass of hair, where the same
+  // count at twice the length and half the width reads as a pincushion of separate wires.
+  const len = R * (0.05 + amount * 0.04 + Math.min(1, days / 900) * 0.13);
+  const strandGeo = new THREE.CylinderGeometry(R * 0.003, R * 0.015, len, 5, 4);
+  strandGeo.translate(0, len / 2, 0);
+  // Curve each strand back and down along the skull, in the strand's own frame. The bend is what
+  // makes it hair; a straight tapered rod at any density is a pincushion.
+  const sp = strandGeo.attributes.position;
+  for (let i = 0; i < sp.count; i++) { const t = sp.getY(i) / len; sp.setZ(i, sp.getZ(i) - t * t * len * 0.95); sp.setY(i, sp.getY(i) - t * t * len * 0.42); }
+  sp.needsUpdate = true; strandGeo.computeVertexNormals();
+  const hairMat = hairMaterial(appearance.hairColor || '#3b2417', 0.5);
+  const hair = new THREE.InstancedMesh(strandGeo, hairMat, count);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), rollQ = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), nrm = new THREE.Vector3(), col = new THREE.Color();
+  let placed = 0, tries = 0;
+  while (placed < count && tries < count * 20) {
+    tries++;
+    const u = Math.random(), v = Math.random();
+    const theta = Math.acos(1 - 2 * u), phi = v * Math.PI * 2; // uniform on sphere
+    nrm.set(Math.sin(theta) * Math.cos(phi), Math.cos(theta), Math.sin(theta) * Math.sin(phi));
+    // scalp region: above brow line (y > 0.18R relative to center), not on the face (z < 0.55R when low)
+    pos.copy(onSurface(nrm, -R * 0.035));  // rooted below the shell, not standing on it
+    const rel = pos.clone().sub(hc);
+    if (rel.y < R * 0.12) continue;
+    if (rel.z > R * 0.45 && rel.y < R * 0.55) continue;
+    if (rel.z > R * 0.7) continue;
+    const density = amount * (0.5 + 0.5 * Math.max(0, rel.y / R)); if (Math.random() > density + 0.35) continue;
+    // Orientation follows the scalp normal, only leaning back and down — the lying-over is in the
+    // geometry above. When the lean dominated the normal instead, hair on the crown grew out
+    // sideways and the head wore a sunburst.
+    const dir = nrm.clone().multiplyScalar(0.78).add(new THREE.Vector3(0, -0.28, -0.34)).normalize();
+    q.setFromUnitVectors(up, dir);
+    q.multiply(rollQ.setFromAxisAngle(up, Math.random() * Math.PI * 2)); // vary which way each bend falls
+    const s = 0.7 + Math.random() * 0.6;
+    m.compose(pos, q, new THREE.Vector3(0.85 + Math.random() * 0.4, s, 0.85 + Math.random() * 0.4));
+    hair.setMatrixAt(placed, m);
+    col.set(hairMat.color).offsetHSL(0, 0, (Math.random() - 0.5) * 0.12); hair.setColorAt(placed, col);
+    placed++;
+  }
+  hair.count = Math.max(1, placed); hair.instanceMatrix.needsUpdate = true; if (hair.instanceColor) hair.instanceColor.needsUpdate = true;
+  hair.castShadow = false; face.add(hair); F.hair = hair;
+  // The volume the strands sit on. A wispy newborn gets a negative stand, which leaves the shell
+  // inside the skin where it cannot be seen and lets the strands alone carry the hair.
+  const capR = surface.radius(new THREE.Vector3(0, 1, 0));
+  // Age gates the volume, not just the amount. A newborn with plenty of hair still has *wispy* hair:
+  // its shell stays inside the skin, where it cannot be seen, and the strands alone carry it. The
+  // shell only emerges as the hair thickens over the first year and a half.
+  const ageK = 0.2 + 0.8 * Math.min(1, days / 600);
+  const capGeo = hairShellGeometry({
+    R: capR,
+    stand: -0.055 + amount * 0.19 * ageK,
+    drop: capR * amount * Math.min(1, days / 900) * 0.55,
+    seed: (Number(days) || 0) * 0.31 + amount * 7,
+    segments: 44,
+    hairline: 0.74,   // a baby's hairline sits high; a fringe on the brows reads as a wig
+  });
+  const cap = new THREE.Mesh(capGeo, hairMat);
+  cap.position.copy(hc).add(new THREE.Vector3(0, R * 0.02, -R * 0.06));
+  cap.castShadow = true; cap.receiveShadow = true;
+  face.add(cap); F.cap = cap;
+  F.headCenterLocal = hc;
+  return F;
+}
+
+// Per-frame face update. state: { blink 0..1, squint 0..1, browRaise -1..1, gazeTarget: Vector3 (world) | null, mouth: 'closed'|'suck', pacifier }
+export function updateFace(F, dt, st, headBone) {
+  // eyes track target
+  if (st.gazeTarget) {
+    const local = headBone.worldToLocal(st.gazeTarget.clone());
+    for (const e of F.eyes) {
+      const dir = local.clone().sub(e.socket.position).normalize();
+      const yaw = THREE.MathUtils.clamp(Math.atan2(dir.x, dir.z), -0.45, 0.45), pitch = THREE.MathUtils.clamp(-Math.atan2(dir.y, Math.hypot(dir.x, dir.z)), -0.35, 0.35);
+      e.eye.rotation.y += (yaw - e.eye.rotation.y) * Math.min(1, dt * 10);
+      e.eye.rotation.x += (pitch - e.eye.rotation.x) * Math.min(1, dt * 10);
+    }
+  } else for (const e of F.eyes) { e.eye.rotation.x *= 0.95; e.eye.rotation.y *= 0.95; }
+  const close = Math.max(st.blink, st.squint * 0.75, st.sleep ? 1 : 0);
+  for (const e of F.eyes) {
+    const target = -0.35 + close * 1.75;
+    e.upper.rotation.x += (target - e.upper.rotation.x) * Math.min(1, dt * (st.blink > 0.5 ? 30 : 12));
+    const lowerT = Math.PI + 0.42 - close * 0.35 - st.smile * 0.25;
+    e.lower.rotation.x += (lowerT - e.lower.rotation.x) * Math.min(1, dt * 10);
+  }
+  for (const b of F.brows) {
+    const ty = b.y0 + st.browRaise * F.mouth.R * 0.06 - st.browFurrow * F.mouth.R * 0.04;
+    b.mesh.position.y += (ty - b.mesh.position.y) * Math.min(1, dt * 8);
+    const trz = b.rz0 + b.sx * (st.browFurrow * 0.35 - st.browRaise * 0.1);
+    b.mesh.rotation.z += (trz - b.mesh.rotation.z) * Math.min(1, dt * 8);
+  }
+  const M = F.mouth;
+  const open = st.cry * 1.0 + st.open * 0.7;
+  M.lowerLip.position.y += ((M.y0 - open * M.R * 0.24) - M.lowerLip.position.y) * Math.min(1, dt * 12);
+  M.upperLip.position.y += ((M.uy0 + open * M.R * 0.04) - M.upperLip.position.y) * Math.min(1, dt * 12);
+  M.lowerLip.scale.x = 1 + st.smile * 0.25 + st.cry * 0.15;
+  M.upperLip.scale.x = 1 + st.smile * 0.25 + st.cry * 0.15;
+  M.tongue.position.y += ((M.y0 - M.R * 0.08 - open * M.R * 0.12) - M.tongue.position.y) * Math.min(1, dt * 10);
+  F.pacifier.visible = !!st.pacifier;
+}
