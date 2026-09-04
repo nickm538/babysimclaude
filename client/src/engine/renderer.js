@@ -3,7 +3,7 @@
 // numbers are exposed on `this.daylight` for the outdoors, effects and art modules.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { PostFX } from './post.js';
+import { PostFX, isSoftwareRenderer } from './post.js';
 
 const TUNGSTEN = new THREE.Color(0xffc98a), DAY_SKY = new THREE.Color(0xbcd6ff);
 
@@ -19,6 +19,14 @@ export class Renderer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // A software rasteriser pays for every shadow texel in CPU time. Detect it before the lighting
+    // rig is built so the maps are sized for what the machine can actually do.
+    // ?quality=high forces the full pipeline even on a software renderer. Slow, but it is the only
+    // way to see on a headless machine what somebody with a GPU actually gets.
+    let forced = null;
+    try { forced = new URLSearchParams(location.search).get('quality'); } catch { /* no location */ }
+    this.software = forced === 'high' ? false : forced === 'low' ? true : isSoftwareRenderer(this.renderer);
+    if (this.software) this.renderer.setPixelRatio(1);
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0c0e12);
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.05, 90);
@@ -52,7 +60,8 @@ export class Renderer {
     this.sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
     this.sun.position.set(6, 8, -4);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(this.isMobile ? 2048 : 4096, this.isMobile ? 2048 : 4096);
+    const shadowRes = this.software ? 1024 : this.isMobile ? 2048 : 4096;
+    this.sun.shadow.mapSize.set(shadowRes, shadowRes);
     this.sun.shadow.camera.near = 2; this.sun.shadow.camera.far = 34;
     // Fit the frustum to the room the player is actually in, not to a generous box around it. The
     // old 18m span spent most of its texels on empty space outside the walls; 7.5m over 4096 is
@@ -69,7 +78,7 @@ export class Renderer {
     for (const [x, z, shadow] of [[0.5, 0.5, false], [-4, -2.5, false], [4.2, -2.6, !this.isMobile], [-3, 3, false]]) {
       const l = new THREE.PointLight(TUNGSTEN, 0, 12, 2);
       l.position.set(x, 2.65, z); s.add(l); this.ceiling.push(l);
-      if (shadow) { l.castShadow = true; l.shadow.mapSize.set(this.isMobile ? 512 : 1024, this.isMobile ? 512 : 1024); l.shadow.bias = -0.002; l.shadow.normalBias = 0.01; l.shadow.radius = 3; l.shadow.camera.near = 0.3; l.shadow.camera.far = 8; }
+      if (shadow && !this.software) { l.castShadow = true; l.shadow.mapSize.set(this.isMobile ? 512 : 1024, this.isMobile ? 512 : 1024); l.shadow.bias = -0.002; l.shadow.normalBias = 0.01; l.shadow.radius = 3; l.shadow.camera.near = 0.3; l.shadow.camera.far = 8; }
     }
     this.lamp = new THREE.PointLight(0xffb86b, 0, 6, 2);
     this.lamp.position.set(2.2, 1.45, 3.6); s.add(this.lamp);
@@ -77,8 +86,34 @@ export class Renderer {
     this.nightlight = new THREE.PointLight(0xffa25c, 0, 3, 2);
     this.nightlight.position.set(5.75, 0.35, -3.0); s.add(this.nightlight);
     // cool fill from the windows so daylight scenes are not lit by tungsten-coloured bounce
-    this.windowFill = new THREE.PointLight(DAY_SKY, 0, 9, 2);
-    this.windowFill.position.set(3.4, 1.7, -4.2); s.add(this.windowFill);
+    // Sits back from the wall so it lights the room rather than burning a hot spot into the plaster
+    // right behind it, and is dimmer now that the window shafts below carry the real daylight.
+    this.windowFill = new THREE.PointLight(DAY_SKY, 0, 11, 2);
+    this.windowFill.position.set(3.2, 1.8, -3.2); s.add(this.windowFill);
+
+    // Sunlight through the windows. The room's walls cast shadows, so the sun outside can never
+    // reach the floor — which is correct, and also why the interior was lit like an overcast
+    // photograph with nothing casting anything. Each window gets a shadow-casting spotlight sitting
+    // just inside the glass, aimed along the real sun direction: furniture and people block it, the
+    // walls do not, and the result is a bright patch of floor that swings across the room over the
+    // day and picks out every leg and edge it crosses. This is where the depth in an interior
+    // actually comes from.
+    this.shafts = [];
+    for (const w of [
+      { pos: [3.0, 1.55, -4.55], normal: [0, 0, 1], target: [2.2, 0, -1.2] },   // north window
+      { pos: [5.55, 1.55, -2.0], normal: [-1, 0, 0], target: [2.4, 0, -1.6] },  // east window
+    ]) {
+      const l = new THREE.SpotLight(0xfff1dc, 0, 16, 0.85, 0.35, 1.1);
+      l.position.set(...w.pos);
+      l.target.position.set(...w.target);
+      l.castShadow = !this.software;
+      const r = this.software ? 512 : this.isMobile ? 1024 : 2048;
+      l.shadow.mapSize.set(r, r);
+      l.shadow.camera.near = 0.4; l.shadow.camera.far = 16;
+      l.shadow.bias = -0.0006; l.shadow.normalBias = 0.012; l.shadow.radius = 2;
+      s.add(l); s.add(l.target);
+      this.shafts.push({ light: l, normal: new THREE.Vector3(...w.normal) });
+    }
   }
 
   // clockSec: seconds since midnight in sim time
@@ -108,7 +143,16 @@ export class Renderer {
     for (const l of this.ceiling) l.intensity = THREE.MathUtils.lerp(l.intensity, lightsOn * (late ? 0.25 : 3.0), 0.1);
     this.lamp.intensity = THREE.MathUtils.lerp(this.lamp.intensity, dusk ? 2.4 : 0, 0.1);
     this.nightlight.intensity = h > 20 || h < 7 ? 0.8 : 0;
-    this.windowFill.intensity = up ? 0.35 + elev * 1.1 : twilight * 0.25;
+    this.windowFill.intensity = up ? 0.25 + elev * 0.55 : twilight * 0.2;
+    // Each shaft is only lit to the extent the sun is actually shining at its window, so the patch
+    // of floor moves across the room and dies away as the sun swings round the house.
+    for (const sh of this.shafts) {
+      const facing = Math.max(0, sunDir.dot(sh.normal));
+      const k = up ? Math.pow(facing, 0.75) * (0.25 + elev * 0.9) : 0;
+      sh.light.intensity = THREE.MathUtils.lerp(sh.light.intensity, k * 9, 0.15);
+      sh.light.color.copy(this.sun.color);
+      sh.light.castShadow = !this.software && sh.light.intensity > 0.15;
+    }
     this.windowFill.color.copy(DAY_SKY).lerp(new THREE.Color(0xffb27a), warm * 0.6);
     // sky gradient: zenith and horizon, warmed at dawn/dusk, deep blue at night
     const zen = new THREE.Color().setHSL(0.6, 0.6, 0.38 + elev * 0.28), hor = new THREE.Color().setHSL(0.57, 0.5, 0.72 + elev * 0.14);

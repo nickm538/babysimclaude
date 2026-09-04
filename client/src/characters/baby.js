@@ -11,8 +11,8 @@ import { SPOTS } from '../world/house.js';
 const OUTFIT_COLORS = { white: '#f5f1ea', mint: '#bfe6d2', sky: '#bcd8f2', peach: '#f7cdb9', lilac: '#d9c7ee', lemon: '#f6e7a6', grey: '#cfd2d6', navy: '#3f4d6b', rose: '#efb2c0' };
 
 export class Baby {
-  constructor(scene, audio, { guest = false } = {}) {
-    this.scene = scene; this.audio = audio; this.guest = guest;
+  constructor(scene, audio, { guest = false, lowSpec = false } = {}) {
+    this.scene = scene; this.audio = audio; this.guest = guest; this.lowSpec = lowSpec;
     this.root = new THREE.Group(); this.root.name = guest ? 'guestBaby' : 'baby'; scene.add(this.root);
     this.rig = new THREE.Group(); this.root.add(this.rig); // rig: rotation for lying/prone; body inside
     this.body = null; this.face = null; this.anim = null; this.builtDays = -1; this.appearanceKey = '';
@@ -38,7 +38,10 @@ export class Baby {
         diaper: clothMaterial(fabricTexture({ color: '#fbfaf7', repeat: 22, weave: 2, seed: 6 }), { sheen: 0.25, sheenTint: 0.6, extra: { roughness: 0.92 } }),
       };
     }
-    const built = buildBabyBody({ days: Math.max(0, days), skinMat: this.mats.skin, clothMat: this.mats.cloth, diaperMat: this.mats.diaper, res: /iPhone|iPad|Android/i.test(navigator.userAgent) ? 72 : 88 });
+    // Grid resolution decides how much anatomy survives: fingers and toes need the cells to be
+    // smaller than a finger. Full fat on a GPU, reduced on mobile, minimal on a software rasteriser.
+    const res = this.lowSpec ? 56 : /iPhone|iPad|Android/i.test(navigator.userAgent) ? 76 : 96;
+    const built = buildBabyBody({ days: Math.max(0, days), skinMat: this.mats.skin, clothMat: this.mats.cloth, diaperMat: this.mats.diaper, res });
     this.body = built.body; this.onesie = built.onesie; this.diaper = built.diaper; this.layout = built.layout; this.bones = built.bones; this.morphNames = built.morphNames;
     this.body.add(this.onesie); this.body.add(this.diaper);
     this.rig.add(this.body);

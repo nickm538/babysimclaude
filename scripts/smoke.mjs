@@ -52,8 +52,8 @@ try {
     // Screenshots are diagnostics, not assertions. On a software rasteriser a single frame can take
     // longer than Playwright's default timeout, and a stalled screenshot must never hold up (or
     // silently fail) a run whose actual checks have all passed.
-    const shoot = async (file) => {
-      try { await page.screenshot({ path: path.join(process.cwd(), 'scripts', file), timeout: 15000 }); return true; }
+    const shoot = async (file, ms = 15000) => {
+      try { await page.screenshot({ path: path.join(process.cwd(), 'scripts', file), timeout: ms }); return true; }
       catch (e) { console.log(`note screenshot ${file} skipped: ${String(e.message).split('\n')[0]}`); return false; }
     };
     const errors = [];
@@ -118,14 +118,20 @@ try {
       rec.npc.root.updateMatrixWorld(true);
       const e = rec.npc.root.matrixWorld.elements;
       const worldScale = Math.hypot(e[0], e[1], e[2]);
-      return { built: true, meshes, verts, hair: !!rec.npc.hair, height: rec.npc.layout.totalH,
+      return { built: true, meshes, verts, hair: !!rec.npc.hair, height: rec.npc.layout.totalH, sitting: !!rec.npc.sitting,
         geoH: g.max.y - g.min.y, skinH: skinned ? skinned.max.y - skinned.min.y : null, worldScale, rootY: rec.npc.root.position.y };
     });
     check(npc.built && npc.verts > 3000, `visitor rendered (${npc.meshes} meshes, ${npc.verts} verts, ${npc.height ? npc.height.toFixed(2) : '?'}m)${npc.reason ? ' — ' + npc.reason : ''}`);
     if (npc.built) {
-      const drawn = npc.skinH ?? npc.geoH;
-      check(Math.abs(drawn * npc.worldScale - npc.height) < 0.12,
-        `visitor is drawn at its designed height (layout ${npc.height.toFixed(2)}m, geometry ${npc.geoH.toFixed(2)}m, skinned ${npc.skinH == null ? 'n/a' : npc.skinH.toFixed(2) + 'm'}, world scale ${npc.worldScale.toFixed(2)})`);
+      // The rest-pose geometry must be exactly the designed height. The skinned box is the posed
+      // one, so a visitor who is sitting down is legitimately shorter — and if they are seated, that
+      // is the check: sitting has to actually change their shape, not just their position.
+      check(Math.abs(npc.geoH * npc.worldScale - npc.height) < 0.1,
+        `visitor is built at its designed height (layout ${npc.height.toFixed(2)}m, geometry ${npc.geoH.toFixed(2)}m, world scale ${npc.worldScale.toFixed(2)})`);
+      if (npc.skinH != null) {
+        const ok = npc.sitting ? npc.skinH < npc.geoH * 0.9 : Math.abs(npc.skinH - npc.geoH) < 0.2;
+        check(ok, `visitor is posed ${npc.sitting ? 'sitting' : 'standing'} (skinned ${npc.skinH.toFixed(2)}m vs rest ${npc.geoH.toFixed(2)}m)`);
+      }
     }
     // Stand back and look at the visitor so the screenshot shows a person, not a wall. The baby goes
     // down first, otherwise a held head fills the frame.
@@ -224,6 +230,22 @@ try {
       await page.evaluate(() => { const G = window.__cradle; G.baby.debug = { noCloth: true, skeleton: true }; const h = G.baby.headWorldPosition(); G.controls.eyeHeight = h.y + 0.5; G.controls.pos.set(h.x + 0.15, 0, h.z + 0.02); G.controls.yaw = 0; G.controls.pitch = -1.5; });
       await wait(1200); await shoot('smoke-skeleton.png');
       await page.evaluate(() => { const G = window.__cradle; G.baby.debug = {}; });
+      // One reference shot at full quality — shadows, ambient occlusion, full mesh density — so the
+      // headless run can show what the pipeline actually produces rather than its fallback.
+      if (process.env.SMOKE_HQ) {
+        await page.goto(base + '/?quality=high', { waitUntil: 'load' });
+        await page.waitForFunction(() => window.__cradle && window.__cradle.baby && window.__cradle.baby.body, null, { timeout: 180000 }).catch(() => {});
+        await wait(6000);
+        const hq = await page.evaluate(() => {
+          const G = window.__cradle;
+          G.controls.colliders = [];
+          G.controls.pos.set(2.0, 0, 1.1); G.controls.eyeHeight = 1.5; G.controls.yaw = 0.35; G.controls.pitch = -0.22;
+          return { post: !!(G.R.post && G.R.post.enabled), shadow: G.R.sun.shadow.mapSize.x, verts: G.baby.body.geometry.attributes.position.count };
+        });
+        await wait(8000);
+        await shoot('smoke-hq.png', 180000);
+        console.log(`note high-quality reference: post=${hq.post} shadowMap=${hq.shadow} babyVerts=${hq.verts}`);
+      }
       await page.evaluate(() => { const G = window.__cradle; G.controls.eyeHeight = 1.62; G.controls.pos.set(-1.5, 0, 3.9); G.controls.yaw = 0; G.controls.pitch = -0.1; G.controls.lookWeight = 0; });
       await wait(1200); await shoot('smoke-room.png');
     }

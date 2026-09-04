@@ -12,18 +12,24 @@ export class Chat {
     this.el.querySelector('#chat-close').onclick = () => this.close();
     this.el.querySelector('#chat-form').onsubmit = (e) => { e.preventDefault(); this.send(); };
     this.el.querySelector('#chat-llm').textContent = store.llm ? 'Live AI (Claude) — the baby responds to what you say and how you say it.' : 'Rule-based responses (add ANTHROPIC_API_KEY on the server for live AI). Tone still matters.';
-    try { const r = await api.chatHistory(store.gameId); this.msgs = (r.messages || []).map((m) => ({ role: m.role, content: m.content, tone: m.tone })); } catch { /* ignore */ }
+    // Reloading the server-side history must not throw away what the child said while the panel was
+    // shut — those lines live only on the client, so keep them and re-append them at the end.
+    const heard = this.msgs.filter((m) => m.unprompted || m.role === 'event');
+    try { const r = await api.chatHistory(store.gameId); this.msgs = (r.messages || []).map((m) => ({ role: m.role, content: m.content, tone: m.tone })); } catch { /* keep what we have */ }
+    this.msgs.push(...heard);
+    this.markHeard();
     this.render();
     if (!('ontouchstart' in window)) this.el.querySelector('#chat-input').focus();
   }
   close() { if (this.el) { this.el.remove(); this.el = null; } this.ctx.onClose?.(); }
+  markHeard() { if (this.unheard) { this.unheard = 0; store.emit('chatUnheard', 0); } }
   toggle() { if (this.el) this.close(); else this.open(); }
   render() {
     if (!this.el) return;
     const box = this.el.querySelector('#chat-msgs');
     box.innerHTML = this.msgs.slice(-40).map((m) => (m.role === 'event'
       ? `<div class="msg event ${escapeHtml(m.kind || '')}">${escapeHtml(m.content)}</div>`
-      : `<div class="msg ${m.role}">${escapeHtml(m.content)}${m.role === 'parent' && m.tone ? `<div class="tone ${m.tone}">${m.tone}</div>` : ''}</div>`)).join('') || `<div class="msg baby">${store.view?.baby.name || 'The baby'} looks at you.</div>`;
+      : `<div class="msg ${m.role}${m.unprompted ? ' unprompted' : ''}">${escapeHtml(m.content)}${m.role === 'parent' && m.tone ? `<div class="tone ${m.tone}">${m.tone}</div>` : ''}</div>`)).join('') || `<div class="msg baby">${store.view?.baby.name || 'The baby'} looks at you.</div>`;
     if (this.busy) box.insertAdjacentHTML('beforeend', '<div class="msg baby">…</div>');
     box.scrollTop = box.scrollHeight;
   }
@@ -54,4 +60,14 @@ export class Chat {
     this.busy = false; this.render();
   }
 }
+// Something the child said unprompted. It goes into the thread even when the panel is closed, so
+// opening it later shows what you missed, and the chat button gets a dot.
+Chat.prototype.hear = function hear(text) {
+  if (!text) return;
+  this.msgs.push({ role: 'baby', content: text, unprompted: true });
+  if (this.msgs.length > 80) this.msgs.splice(0, this.msgs.length - 80);
+  if (this.el) { this.unheard = 0; this.render(); }
+  else { this.unheard = (this.unheard || 0) + 1; store.emit('chatUnheard', this.unheard); }
+};
+
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

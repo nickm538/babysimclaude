@@ -125,8 +125,12 @@ function bodyBalls(L) {
   ball(new THREE.Vector3(0, hc.y + P.headR * 0.45, P.headR * 0.25), P.headR * 0.55, 0.6); // forehead bulge
   for (const sx of [-1, 1]) ball(new THREE.Vector3(sx * P.headR * 0.55, hc.y - P.headR * 0.3, P.headR * 0.55), P.headR * 0.3 * (0.9 + 0.2 * P.chub), 0.8); // cheeks
   ball(new THREE.Vector3(0, hc.y - P.headR * 0.75, P.headR * 0.5), P.headR * 0.36, 0.7); // chin/jaw
-  ball(new THREE.Vector3(0, hc.y - P.headR * 0.1, P.headR * 0.93), P.headR * 0.17, 0.8); // nose
-  for (const sx of [-1, 1]) ball(new THREE.Vector3(sx * P.headR * 0.4, hc.y + P.headR * 0.04, P.headR * 1.0), P.headR * 0.2, -0.32); // shallow eye sockets
+  // Nose: a bridge running down from between the brows into a rounded tip, with the tip standing
+  // proud. One ball gives a snout; three give a nose.
+  ball(new THREE.Vector3(0, hc.y + P.headR * 0.12, P.headR * 0.82), P.headR * 0.1, 0.45);   // bridge
+  ball(new THREE.Vector3(0, hc.y - P.headR * 0.08, P.headR * 0.95), P.headR * 0.15, 0.85);  // tip
+  for (const sx of [-1, 1]) ball(new THREE.Vector3(sx * P.headR * 0.1, hc.y - P.headR * 0.14, P.headR * 0.9), P.headR * 0.075, 0.5); // nostril wings
+  for (const sx of [-1, 1]) ball(new THREE.Vector3(sx * P.headR * 0.4, hc.y + P.headR * 0.04, P.headR * 1.0), P.headR * 0.22, -0.4); // eye sockets
   // neck
   seg(J.neck, J.head, P.headR * 0.42, P.headR * 0.45, 2, 0.8);
   // torso
@@ -155,8 +159,8 @@ function bodyBalls(L) {
   }
   // the details that make a face a face: nostrils either side of the nose tip, the groove of the
   // philtrum above the lip, and a navel — all carved with negative balls
-  for (const sx of [-1, 1]) ball(new THREE.Vector3(sx * P.headR * 0.075, hc.y - P.headR * 0.19, P.headR * 1.02), P.headR * 0.05, -0.25);
-  ball(new THREE.Vector3(0, hc.y - P.headR * 0.33, P.headR * 0.98), P.headR * 0.06, -0.12);
+  for (const sx of [-1, 1]) ball(new THREE.Vector3(sx * P.headR * 0.07, hc.y - P.headR * 0.2, P.headR * 0.95), P.headR * 0.045, -0.3);   // nostrils
+  ball(new THREE.Vector3(0, hc.y - P.headR * 0.3, P.headR * 0.95), P.headR * 0.05, -0.14);                                                // philtrum
   ball(new THREE.Vector3(0, J.hips.y + P.torsoLen * 0.22, P.bellyR * (1.0 + 0.15 * P.chub)), P.bellyR * 0.12, -0.3);
   return B;
 }

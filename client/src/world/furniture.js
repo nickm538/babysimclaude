@@ -113,8 +113,32 @@ export function buildFurniture(g, colliders, interactables, opts) {
   F.dresser = add(dresser, { min: { x: 5.2, z: 0.3 }, max: { x: 5.8, z: 1.3 } }, { id: 'dresser', label: 'Wardrobe' });
   // rocking chair
   const rc = new THREE.Group(); rc.position.set(3.0, 0, -3.8); rc.rotation.y = 0.6;
-  rc.add(box(0.55, 0.06, 0.5, wood, 0, 0.45, 0)); rc.add(box(0.55, 0.6, 0.05, wood, 0, 0.78, -0.24));
-  for (const sx of [-1, 1]) { const r = cyl(0.02, 0.02, 0.7, darkWood, sx * 0.26, 0.05, 0, 8); r.rotation.x = Math.PI / 2; rc.add(r); for (const sz of [-0.2, 0.2]) rc.add(cyl(0.02, 0.02, 0.4, darkWood, sx * 0.26, 0.25, sz, 8)); }
+  // Built like a real nursing chair: curved rockers, splayed legs, a spindle back with turned beads,
+  // arms you could rest an elbow on, and a cushion. The flat board that used to be the back was the
+  // most obviously fake object in the nursery.
+  const seat = rounded(0.56, 0.07, 0.5, 0.03, wood); seat.position.set(0, 0.45, 0); rc.add(seat);
+  const cushion = rounded(0.5, 0.09, 0.44, 0.04, cushionFab); cushion.position.set(0, 0.52, 0.01); rc.add(cushion);
+  for (const sx of [-1, 1]) {
+    // rockers as an arc of short segments, so they curve rather than being a straight bar
+    for (let i = 0; i < 9; i++) {
+      const t = (i / 8 - 0.5) * 0.62;
+      const seg = box(0.045, 0.035, 0.09, darkWood, sx * 0.26, 0.028 + t * t * 0.55, t);
+      seg.rotation.x = -t * 1.5; rc.add(seg);
+    }
+    for (const sz of [-0.19, 0.19]) {
+      const leg = cyl(0.022, 0.028, 0.42, darkWood, sx * 0.26, 0.24, sz, 10);
+      leg.rotation.x = sz > 0 ? 0.06 : -0.06; rc.add(leg);
+    }
+    const arm = rounded(0.07, 0.05, 0.46, 0.02, wood); arm.position.set(sx * 0.29, 0.68, -0.02); rc.add(arm);
+    rc.add(cyl(0.018, 0.018, 0.24, darkWood, sx * 0.29, 0.57, 0.18, 8));
+    rc.add(cyl(0.026, 0.026, 0.58, wood, sx * 0.26, 0.74, -0.23, 10));
+  }
+  for (let i = 0; i < 5; i++) {
+    const x = -0.18 + i * 0.09;
+    rc.add(cyl(0.013, 0.016, 0.5, wood, x, 0.72, -0.23, 8));
+    rc.add(cyl(0.021, 0.021, 0.05, wood, x, 0.62, -0.23, 8));   // a turned bead partway up
+  }
+  const rail = rounded(0.58, 0.09, 0.05, 0.02, wood); rail.position.set(0, 1.02, -0.23); rc.add(rail);
   F.rocker = add(rc, { min: { x: 2.65, z: -4.15 }, max: { x: 3.35, z: -3.45 } }, { id: 'rocker', label: 'Rocking chair' });
   // nightlight
   const nl = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 12), matte({ color: 0xffd9a8, emissive: 0xffb070, emissiveIntensity: 0.6 })); nl.position.set(5.86, 0.35, -3.0); g.add(nl); F.nightlightMesh = nl;
@@ -127,6 +151,37 @@ export function buildFurniture(g, colliders, interactables, opts) {
   const ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 24, 24), matte({ color: 0xff6f61, roughness: 0.45 })); ball.position.set(0.55, 0.11, -0.3); ball.castShadow = true; F.toys.add(ball); F.ball = ball;
   const rattle = new THREE.Group(); rattle.position.set(-0.4, 0.04, -0.4); rattle.add(cyl(0.012, 0.012, 0.14, white, 0, 0, 0, 8).rotateZ(Math.PI / 2)); const rh = new THREE.Mesh(new THREE.SphereGeometry(0.045, 16, 16), matte({ color: 0x118ab2, roughness: 0.5 })); rh.position.x = 0.1; rattle.add(rh); F.toys.add(rattle);
   const book = box(0.18, 0.02, 0.15, matte({ color: 0xffd166, roughness: 0.8 }), 0.2, 0.01, 0.6); F.toys.add(book);
+
+  // The clutter a house with a baby actually has. A room that is tidy and sparse reads as a
+  // showroom; the muslins over the sofa arm, the basket of washing nobody folded and the mug you
+  // put down two hours ago are what make it look lived in.
+  const clutter = new THREE.Group(); g.add(clutter); F.clutter = clutter;
+  // laundry basket with a heap of washing
+  const basket = new THREE.Group(); basket.position.set(-1.9, 0, 2.9); basket.rotation.y = 0.4;
+  basket.add(new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.19, 0.3, 18, 1, true), clothMaterial(fabricTexture({ color: '#d8cbb4', repeat: 6, weave: 2, seed: 12 }), { sheen: 0.3, extra: { side: THREE.DoubleSide } })).translateY(0.15));
+  for (let i = 0; i < 5; i++) {
+    const c = ['#e7dfd2', '#bcd8f2', '#f7cdb9', '#cfd2d6', '#bfe6d2'][i];
+    const heap = new THREE.Mesh(new THREE.SphereGeometry(0.09 + rand() * 0.04, 12, 9), clothMaterial(fabricTexture({ color: c, repeat: 8, weave: 3, seed: 20 + i }), { sheen: 0.5 }));
+    heap.position.set((rand() - 0.5) * 0.22, 0.3 + rand() * 0.05, (rand() - 0.5) * 0.22);
+    heap.scale.set(1, 0.55, 1); heap.rotation.y = rand() * 3; heap.castShadow = true; basket.add(heap);
+  }
+  clutter.add(basket);
+  // muslins over the sofa arm
+  for (let i = 0; i < 2; i++) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.012, 0.34), clothMaterial(fabricTexture({ color: i ? '#f5f1ea' : '#bfe6d2', repeat: 10, weave: 2, seed: 30 + i }), { sheen: 0.6 }));
+    m.position.set(-0.55 + i * 0.06, 0.63 - i * 0.02, 1.9 + i * 0.05); m.rotation.set(0.1, 0.3 + i * 0.4, 0.35);
+    m.castShadow = m.receiveShadow = true; clutter.add(m);
+  }
+  // a mug and a half-read book on the floor by the sofa
+  clutter.add(cyl(0.042, 0.036, 0.095, white, 1.55, 0.05, 1.45, 18));
+  const floorBook = box(0.2, 0.03, 0.16, matte({ color: 0xc96f5a, roughness: 0.75 }), 1.15, 0.015, 1.15);
+  floorBook.rotation.y = 0.5; clutter.add(floorBook);
+  // a nappy stack and a wipes pack left out on the floor near the changing table
+  const stack = box(0.22, 0.14, 0.16, clothMaterial(fabricTexture({ color: '#eef2f6', repeat: 12, weave: 2, seed: 41 }), { sheen: 0.35 }), 4.0, 0.07, -0.55);
+  stack.rotation.y = -0.3; clutter.add(stack);
+  // a toy left where it was dropped, in the middle of the floor
+  const stray = new THREE.Mesh(new THREE.SphereGeometry(0.055, 18, 14), matte({ color: 0x8338ec, roughness: 0.5 }));
+  stray.position.set(1.9, 0.055, 0.05); stray.castShadow = true; clutter.add(stray);
 
   // playpen (hidden until owned)
   const pen = new THREE.Group(); pen.position.set(-2.5, 0, 1.2); pen.visible = false;

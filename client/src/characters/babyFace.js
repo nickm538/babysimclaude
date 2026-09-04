@@ -37,7 +37,7 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
   headBone.add(face);
   const F = { group: face, eyes: [], lids: [], brows: [], gaze: new THREE.Vector3(0, 0, 1), blink: 0, squint: 0, browRaise: 0, browFurrow: 0 };
 
-  const eyeR = R * 0.165;
+  const eyeR = R * 0.145;   // a real eyeball is smaller than it looks; the opening does the work
   // The eye is one solid object. A see-through cornea sphere over an iris reads as a glass marble
   // with something floating inside it; a real eye is an opaque ball with a wet film on top, and the
   // corneal bulge is a shape, not a transparency. So: an opaque sclera with a clearcoat for the tear
@@ -56,24 +56,38 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
     iris.rotation.x = Math.PI / 2; iris.scale.z = 1.12; eye.add(iris);
     socket.add(eye);
     // lids: sphere caps slightly larger than the eye, skin material; upper rotates down to blink
-    const lidGeo = new THREE.SphereGeometry(eyeR * 1.16, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.5);
-    const upper = new THREE.Mesh(lidGeo, skinMat); upper.rotation.x = -0.35; upper.scale.set(1.05, 1, 1.05); socket.add(upper);
-    const lower = new THREE.Mesh(lidGeo, skinMat); lower.rotation.x = Math.PI + 0.42; lower.scale.set(1.05, 1, 1.05); socket.add(lower);
+    // Lids are caps over the eyeball; how far they are rotated back is the whole difference between
+    // an open eye and a suspicious squint. A baby's palpebral fissure is wide and round.
+    const lidGeo = new THREE.SphereGeometry(eyeR * 1.14, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    const upper = new THREE.Mesh(lidGeo, skinMat); upper.rotation.x = -0.62; upper.scale.set(1.06, 1, 1.06); socket.add(upper);
+    const lower = new THREE.Mesh(lidGeo, skinMat); lower.rotation.x = Math.PI + 0.66; lower.scale.set(1.06, 1, 1.06); socket.add(lower);
     // lashes: thin dark torus arc on the upper lid edge
-    const lash = new THREE.Mesh(new THREE.TorusGeometry(eyeR * 1.12, eyeR * 0.045, 6, 24, Math.PI * 0.95), hairMaterial('#2a1a12', 0.85));
-    lash.position.y = eyeR * 0.15; lash.rotation.set(Math.PI * 0.62, 0, Math.PI * 0.03); upper.add(lash);
+    const lash = new THREE.Mesh(new THREE.TorusGeometry(eyeR * 1.1, eyeR * 0.028, 6, 22, Math.PI * 0.8), hairMaterial('#2a1a12', 0.85));
+    lash.position.y = eyeR * 0.06; lash.rotation.set(Math.PI * 0.5, 0, Math.PI * 0.1); lash.scale.set(1, 1, 0.55); upper.add(lash);
     face.add(socket);
     F.eyes.push({ socket, eye, upper, lower, sx });
     // brow
-    const brow = new THREE.Mesh(new THREE.TorusGeometry(R * 0.2, R * 0.028, 8, 20, Math.PI * 0.8), hairMaterial(appearance.hairColor || '#4a2f1d', 0.9));
-    brow.position.copy(onSurface(V(sx * 0.42, 0.34, 1), R * 0.01));
-    brow.rotation.set(0.3, 0, Math.PI * 0.1 + sx * 0.05); brow.scale.set(1, 0.6, 0.35);
+    // A brow is a short, shallow, slightly angled smudge sitting on the ridge — wide, barely curved,
+    // and pressed flat against the skin. A big open arc standing off the face reads as a drawn-on
+    // parenthesis, which is what this used to be.
+    const brow = new THREE.Mesh(new THREE.TorusGeometry(R * 0.15, R * 0.019, 6, 18, Math.PI * 0.52), hairMaterial(appearance.hairColor || '#4a2f1d', 0.92));
+    brow.position.copy(onSurface(V(sx * 0.4, 0.26, 1), -R * 0.005));
+    brow.rotation.set(0.12, sx * 0.22, Math.PI * 0.74 + sx * 0.06);
+    brow.scale.set(1, 0.9, 0.22);
     face.add(brow); F.brows.push({ mesh: brow, sx, y0: brow.position.y, rz0: brow.rotation.z });
     // ear
-    const ear = new THREE.Mesh(new THREE.SphereGeometry(R * 0.2, 20, 14), skinMat);
-    ear.position.copy(onSurface(V(sx, -0.02, -0.08), R * 0.04)); ear.scale.set(0.45, 1, 0.75); ear.rotation.y = sx * 0.3; face.add(ear);
-    const concha = new THREE.Mesh(new THREE.SphereGeometry(R * 0.11, 14, 10), new THREE.MeshStandardMaterial({ color: new THREE.Color(appearance.skinTone || '#f0c9ae').multiplyScalar(0.72), roughness: 0.9 }));
-    concha.position.copy(onSurface(V(sx, -0.03, -0.05), R * 0.06)); concha.scale.set(0.35, 0.8, 0.6); face.add(concha);
+    // An ear is a curled rim around a hollow, with a lobe. Three pieces, all in skin, all attached
+    // to the head — an ellipsoid stuck on the side is the single most doll-like thing a face can do.
+    const earG = new THREE.Group();
+    earG.position.copy(onSurface(V(sx, -0.02, -0.06), R * 0.015));
+    earG.rotation.set(0, sx * 0.42, sx * -0.12);
+    const helix = new THREE.Mesh(new THREE.TorusGeometry(R * 0.115, R * 0.028, 8, 22, Math.PI * 1.45), skinMat);
+    helix.rotation.set(0, Math.PI / 2, Math.PI * 0.32); helix.scale.set(1, 1.18, 0.55); earG.add(helix);
+    const bowl = new THREE.Mesh(new THREE.SphereGeometry(R * 0.085, 16, 12), skinMat);
+    bowl.scale.set(0.42, 1.0, 0.72); bowl.position.set(-sx * R * 0.012, -R * 0.012, 0); earG.add(bowl);
+    const lobe = new THREE.Mesh(new THREE.SphereGeometry(R * 0.042, 12, 10), skinMat);
+    lobe.scale.set(0.55, 0.85, 0.8); lobe.position.set(0, -R * 0.125, R * 0.006); earG.add(lobe);
+    face.add(earG);
   }
   // mouth: cavity (dark) + tongue + lips
   const mouthSurf = onSurface(V(0, -0.45, 1), 0);
@@ -88,10 +102,11 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
     sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xff9a8a), // lips scatter red at the rim
     normalMap: skinMicroTexture().normalMap || skinMicroTexture().map, normalScale: new THREE.Vector2(0.35, 0.35),
   });
-  const upperLip = new THREE.Mesh(new THREE.TorusGeometry(R * 0.2, R * 0.045, 10, 26, Math.PI), lipMat);
-  upperLip.position.copy(mouthSurf).add(V(0, R * 0.03, R * 0.01)); upperLip.rotation.set(-0.4, 0, 0); upperLip.scale.set(1, 0.5, 0.7); face.add(upperLip);
-  const lowerLip = new THREE.Mesh(new THREE.TorusGeometry(R * 0.19, R * 0.05, 10, 26, Math.PI), lipMat);
-  lowerLip.position.copy(mouthSurf).add(V(0, -R * 0.02, R * 0.01)); lowerLip.rotation.set(0.5, 0, Math.PI); lowerLip.scale.set(1, 0.55, 0.7); face.add(lowerLip);
+  const upperLip = new THREE.Mesh(new THREE.TorusGeometry(R * 0.155, R * 0.032, 8, 24, Math.PI), lipMat);
+  upperLip.position.copy(mouthSurf).add(V(0, R * 0.018, -R * 0.004)); upperLip.rotation.set(-0.18, 0, 0); upperLip.scale.set(1.05, 0.42, 0.42); face.add(upperLip);
+  // the lower lip is fuller and sits slightly proud — that asymmetry is most of what reads as a mouth
+  const lowerLip = new THREE.Mesh(new THREE.TorusGeometry(R * 0.148, R * 0.042, 8, 24, Math.PI), lipMat);
+  lowerLip.position.copy(mouthSurf).add(V(0, -R * 0.022, R * 0.002)); lowerLip.rotation.set(0.22, 0, Math.PI); lowerLip.scale.set(1.02, 0.5, 0.5); face.add(lowerLip);
   F.mouth = { cavity, tongue, upperLip, lowerLip, y0: lowerLip.position.y, uy0: upperLip.position.y, R };
   // pacifier (hidden)
   const paci = new THREE.Group(); paci.position.copy(mouthSurf).add(V(0, 0, R * 0.05)); paci.visible = false;

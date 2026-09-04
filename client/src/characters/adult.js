@@ -83,7 +83,13 @@ function adultBalls(L, female) {
   ball(V(0, hc.y + P.headR * 0.42, P.headR * 0.2), P.headR * 0.56, 0.55);
   ball(V(0, hc.y - P.headR * 0.55, P.headR * 0.16), P.headR * 0.58, 0.75);   // jaw
   ball(V(0, hc.y - P.headR * 0.78, P.headR * 0.3), P.headR * 0.3, 0.5);      // chin
-  ball(V(0, hc.y - P.headR * 0.12, P.headR * 0.78), P.headR * 0.15, 0.32);   // nose
+  // nose: bridge, tip, nostril wings — and carved nostrils and a philtrum below
+  ball(V(0, hc.y + P.headR * 0.1, P.headR * 0.66), P.headR * 0.085, 0.3);
+  ball(V(0, hc.y - P.headR * 0.12, P.headR * 0.8), P.headR * 0.115, 0.42);
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.09, hc.y - P.headR * 0.17, P.headR * 0.75), P.headR * 0.06, 0.3);
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.06, hc.y - P.headR * 0.21, P.headR * 0.78), P.headR * 0.035, -0.28);
+  ball(V(0, hc.y - P.headR * 0.3, P.headR * 0.78), P.headR * 0.04, -0.12);
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.34, hc.y + P.headR * 0.03, P.headR * 0.82), P.headR * 0.16, -0.3);  // eye sockets
   for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.5, hc.y - P.headR * 0.2, P.headR * 0.45), P.headR * 0.3, 0.4); // cheekbones
 
   // neck into shoulders (trapezius)
@@ -144,7 +150,7 @@ export function appearanceFor(id, { relation = 'friend' } = {}) {
 // A visitor standing in the room. `build()` is deliberate about cost: an NPC is only ever built when
 // somebody actually arrives, and disposed when they leave.
 export class Adult {
-  constructor(scene, { id = 'guest', relation = 'friend', name = 'Visitor', mobile = false } = {}) {
+  constructor(scene, { id = 'guest', relation = 'friend', name = 'Visitor', mobile = false, lowSpec = false } = {}) {
     this.scene = scene; this.id = id; this.name = name;
     this.look = appearanceFor(id, { relation });
     this.root = new THREE.Group(); this.root.name = 'adult:' + id;
@@ -152,6 +158,7 @@ export class Adult {
     this.t = Math.random() * 10;
     this.gaze = new THREE.Vector3(0, 1.5, 1);
     this.mobile = mobile;
+    this.lowSpec = !!lowSpec;
     this.build();
   }
 
@@ -162,7 +169,7 @@ export class Adult {
     const balls = adultBalls(L, look.female);
     const reach = L.J.handTipR.x + 0.08;
     const bounds = { min: V(-reach, -0.06, -0.3), max: V(reach, L.totalH + 0.06, 0.34) };
-    const res = this.mobile ? 64 : 80;
+    const res = this.lowSpec ? 56 : this.mobile ? 64 : 80;
 
     this.skin = makeSkinMaterial({ skinTone: look.skinTone, sss: 0.32, blush: 0.14 });
     const geo = polygonise(balls, res, bounds, 1.0, 3);
@@ -226,32 +233,43 @@ export class Adult {
       const ir = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 1.012, 24, 12, 0, Math.PI * 2, 0, 0.58), iris);
       ir.rotation.x = Math.PI / 2; ir.scale.z = 1.12; socket.add(ir);
       // lids in skin, so blinking is the same material as the face
-      const lidGeo = new THREE.SphereGeometry(eyeR * 1.14, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5);
-      const upper = new THREE.Mesh(lidGeo, this.skin); upper.rotation.x = -0.42; socket.add(upper);
-      const lower = new THREE.Mesh(lidGeo, this.skin); lower.rotation.x = Math.PI + 0.5; socket.add(lower);
+      const lidGeo = new THREE.SphereGeometry(eyeR * 1.12, 22, 12, 0, Math.PI * 2, 0, Math.PI * 0.5);
+      const upper = new THREE.Mesh(lidGeo, this.skin); upper.rotation.x = -0.6; upper.scale.set(1.05, 1, 1.05); socket.add(upper);
+      const lower = new THREE.Mesh(lidGeo, this.skin); lower.rotation.x = Math.PI + 0.68; lower.scale.set(1.05, 1, 1.05); socket.add(lower);
+      const lash = new THREE.Mesh(new THREE.TorusGeometry(eyeR * 1.08, eyeR * 0.024, 6, 20, Math.PI * 0.8), hairMaterial('#241610', 0.85));
+      lash.position.y = eyeR * 0.05; lash.rotation.set(Math.PI * 0.5, 0, Math.PI * 0.1); lash.scale.set(1, 1, 0.55); upper.add(lash);
       face.add(socket);
       this.eyes.push({ socket, upper, lower, sx });
 
-      const brow = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.17, P.headR * 0.022, 6, 14, Math.PI * 0.85),
-        hairMaterial(new THREE.Color(look.hairColor).multiplyScalar(0.8), 0.9));
-      brow.position.copy(onSurface(V(sx * 0.36, 0.33, 1), P.headR * 0.01));
-      brow.rotation.set(0.28, 0, Math.PI * 0.1 + sx * 0.04); brow.scale.set(1, 0.55, 0.3);
+      const brow = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.14, P.headR * 0.017, 6, 16, Math.PI * 0.5),
+        hairMaterial(new THREE.Color(look.hairColor).multiplyScalar(0.8), 0.92));
+      brow.position.copy(onSurface(V(sx * 0.35, 0.25, 1), -P.headR * 0.005));
+      brow.rotation.set(0.1, sx * 0.22, Math.PI * 0.74 + sx * 0.06);
+      brow.scale.set(1, 0.9, 0.2);
       face.add(brow);
 
-      const ear = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 0.2, 14, 10), this.skin);
-      ear.position.copy(onSurface(V(sx, -0.02, -0.1), P.headR * 0.02));
-      ear.scale.set(0.4, 1.05, 0.72); ear.rotation.y = sx * 0.28; face.add(ear);
+      // the same three-piece ear the baby has: a curled rim, a hollow and a lobe
+      const earG = new THREE.Group();
+      earG.position.copy(onSurface(V(sx, -0.02, -0.08), P.headR * 0.01));
+      earG.rotation.set(0, sx * 0.4, sx * -0.1);
+      const helix = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.115, P.headR * 0.025, 8, 20, Math.PI * 1.45), this.skin);
+      helix.rotation.set(0, Math.PI / 2, Math.PI * 0.32); helix.scale.set(1, 1.2, 0.5); earG.add(helix);
+      const bowl = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 0.08, 14, 10), this.skin);
+      bowl.scale.set(0.4, 1.0, 0.7); bowl.position.set(-sx * P.headR * 0.012, -P.headR * 0.01, 0); earG.add(bowl);
+      const lobe = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 0.04, 10, 8), this.skin);
+      lobe.scale.set(0.55, 0.9, 0.8); lobe.position.set(0, -P.headR * 0.13, P.headR * 0.005); earG.add(lobe);
+      face.add(earG);
     }
 
     // mouth: a closed line that catches shadow, not a painted stripe
-    const lips = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.17, P.headR * 0.032, 6, 16, Math.PI),
+    const lips = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.135, P.headR * 0.026, 8, 20, Math.PI),
       new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(look.skinTone).multiplyScalar(0.72).lerp(new THREE.Color(0xa2544e), 0.35),
         roughness: 0.45, clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.4, sheenColor: new THREE.Color(0xe08a80),
         normalMap: skinMicroTexture().normalMap || skinMicroTexture().map, normalScale: new THREE.Vector2(0.3, 0.3),
       }));
-    lips.position.copy(onSurface(V(0, -0.55, 1), P.headR * 0.005));
-    lips.rotation.set(Math.PI * 0.5, 0, Math.PI); lips.scale.set(1, 1, 0.5);
+    lips.position.copy(onSurface(V(0, -0.5, 1), -P.headR * 0.004));
+    lips.rotation.set(Math.PI * 0.5 + 0.2, 0, Math.PI); lips.scale.set(1.05, 1, 0.42);
     face.add(lips);
 
     // hair: an instanced shell of short strands over the scalp, so it has volume and catches light
@@ -267,7 +285,7 @@ export class Adult {
     cap.rotation.x = -0.12; cap.scale.set(1.02, 1.0, 1.06); cap.castShadow = true;
     this.bones.head.add(cap);
     this.hairCap = cap;
-    const count = this.mobile ? 900 : 2200;
+    const count = this.lowSpec ? 260 : this.mobile ? 900 : 2200;
     const len = P.headR * (0.35 + look.hairLength * 2.2);
     const geo = new THREE.CylinderGeometry(P.headR * 0.012, P.headR * 0.004, len, 4, 1, false);
     geo.translate(0, len * 0.5, 0);
@@ -340,11 +358,20 @@ export class Adult {
       if (sh) sh.rotation.x = k * (Math.PI * 0.5 - 0.15);
     }
 
-    // arms hang and swing a little; elbows never lock straight. Seated, they rest on the thighs.
+    // Arms hang and swing a little; elbows never lock straight. Seated, they rest on the thighs.
+    // The sign matters: the rest pose is a T, and the arm points along +X on the right, so bringing
+    // it DOWN is a negative rotation about Z. Getting this backwards stands everyone in the room
+    // with both arms over their head, which is what it used to do.
     for (const [s, sx] of [['L', -1], ['R', 1]]) {
       const ua = B['upperArm' + s], fa = B['foreArm' + s];
-      if (ua) { ua.rotation.z = sx * (Math.PI * 0.46 - 0.05) + sx * sway * 0.03 * (1 - k); ua.rotation.x = sway2 * 0.05 + k * 0.35; }
-      if (fa) { fa.rotation.y = -sx * (0.18 + breath * 0.03); fa.rotation.x = -k * 0.9; }
+      if (ua) {
+        ua.rotation.z = -sx * (Math.PI * 0.46 - 0.05) - sx * sway * 0.03 * (1 - k);
+        ua.rotation.x = sway2 * 0.05 + k * 0.5;             // seated, the upper arms come forward
+      }
+      if (fa) {
+        fa.rotation.z = -sx * (0.2 + breath * 0.04);         // a natural carrying angle, never locked
+        fa.rotation.x = -k * 1.0;                            // seated, forearms fold onto the thighs
+      }
     }
 
     // head towards the gaze target, clamped so nobody swivels like an owl

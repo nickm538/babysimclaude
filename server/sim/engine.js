@@ -8,6 +8,7 @@ import { updateIllness, rollIllnessOnset } from './health.js';
 import { roamAndHazards, runBabysitter } from './events.js';
 import { rollStoryEvents, notify } from './story.js';
 import { socialTick } from './social.js';
+import { rollSpeech } from './speech.js';
 
 export function ageDays(game) { return game.sim.time / DAY; }
 export function clockSeconds(game) { return (TIME.BIRTH_CLOCK + game.sim.time) % DAY; }
@@ -176,6 +177,12 @@ function step(game, dt, opts, rng) {
   // --- babysitter, roaming, hazards, orders ---
   if (sitter) runBabysitter(game, dtH, rng);
   socialTick(game, dtH, rng);
+  // The child says something without being spoken to first. Journalled as its own type so the chat
+  // panel can pick it up and put it in the thread where the parent is already looking.
+  if (!opts.offline || sitter) {
+    const said = rollSpeech(game, dtH, rng);
+    if (said) log(game, 'says', said, 'info');
+  }
   roamAndHazards(game, dt, rng, days, supervised && !sitter, opts.offline);
   updateOrders(game, t0, t);
   rollStoryEvents(game, dtH, rng, opts);

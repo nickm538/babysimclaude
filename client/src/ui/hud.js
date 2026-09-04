@@ -44,7 +44,7 @@ export class HUD {
         <div class="fabs">
           <button class="fab" id="fab-phone" title="Phone" aria-label="Phone">${icon('device')}<span class="badge hidden" id="fab-badge"></span></button>
           <button class="fab" id="fab-alerts" title="Alerts" aria-label="Alerts">${icon('bell')}</button>
-          <button class="fab" id="fab-chat" title="Talk to baby" aria-label="Talk to baby">${icon('chat')}</button>
+          <button class="fab" id="fab-chat" title="Talk to baby" aria-label="Talk to baby">${icon('chat')}<span class="badge hidden" id="chat-badge"></span></button>
           <button class="fab" id="fab-goto" title="Go to baby" aria-label="Go to baby">${icon('baby')}</button>
         </div>
         <div class="actionwrap">
@@ -57,6 +57,13 @@ export class HUD {
     this.$('vitals').querySelector('.head').onclick = () => this.$('vitals').classList.toggle('collapsed');
     this.mood = new MoodMeter(this.$('mood-meter'), { onOpen: () => onMood && onMood() });
     this.$('fab-phone').onclick = onPhone; this.$('fab-chat').onclick = onChat; this.$('fab-goto').onclick = onGoTo;
+    // The child talks to you unprompted; if the panel is shut, say so on the button.
+    store.on('chatUnheard', (n) => {
+      const b = this.$('chat-badge'); if (!b) return;
+      b.textContent = n > 9 ? '9+' : String(n);
+      b.classList.toggle('hidden', !n);
+      this.$('fab-chat').classList.toggle('urgent', !!n);
+    });
     if (onAlerts) this.$('fab-alerts').onclick = onAlerts;
     this.alertHost = this.$('alerts');
     this.speedEl = this.$('hud-speed');

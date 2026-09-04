@@ -85,7 +85,7 @@ function buildWorld(view) {
   const house = buildHouse(R.scene);
   const controls = new FirstPersonControls(R.camera, document.getElementById('gl'), { colliders: house.colliders });
   const audio = new GameAudio();
-  const baby = new Baby(R.scene, audio);
+  const baby = new Baby(R.scene, audio, { lowSpec: R.software });
   const heldRig = new THREE.Group(); R.camera.add(heldRig); R.scene.add(R.camera);
   const arms = new ParentArms(R.camera, { skinTone: view.baby.appearance.skinTone });
   const G = { R, house, controls, audio, baby, heldRig, arms, action: null, holding: null, holdingFood: null, near: {}, tapCooldown: 0, guest: null, lastActionsKey: '' };
@@ -111,7 +111,7 @@ function buildWorld(view) {
   try { G.art = buildArt(R.scene, { name: view.baby.name }); } catch (e) { console.warn('[art]', e.message); }
   try { G.effects = new Effects(R.scene); } catch (e) { console.warn('[effects]', e.message); }
   // People the social layer sends round now actually stand in the room.
-  try { G.visitors = new Visitors(R.scene, { mobile: R.isMobile }); } catch (e) { console.warn('[visitors]', e.message); }
+  try { G.visitors = new Visitors(R.scene, { mobile: R.isMobile, lowSpec: R.software }); } catch (e) { console.warn('[visitors]', e.message); }
   G.phone = new Phone(overlay, { run: (id, p, o) => runAction(G, id, p, o), setSpeed: (s) => setSpeed(G, s), audio, switchGame: () => restart(), signOut: () => { api.setToken(null); location.reload(); }, playdate: (kind, arg) => playdate(G, kind, arg), get tts() { return G.tts; }, set tts(v) { G.tts = v; } });
   G.chat = new Chat(overlay, {
     nearBaby: () => G.near.baby || (store.view && store.view.baby.state.held),
@@ -335,6 +335,8 @@ async function uiAction(G, what) {
 
 function onEvent(G, e) {
   const sev = e.sev || 'info';
+  // The child spoke first. It belongs in the chat thread, not in a toast that vanishes.
+  if (e.type === 'says') { G.chat?.hear(e.text); if (G.audio.ctx) G.audio.coo?.(); return; }
   if (['doorbell'].includes(e.type)) { if (G.audio.ctx) G.audio.doorbell(); store.toast(e.text, 'good', 6000); return; }
   if (['cry_start'].includes(e.type)) { store.toast(e.text, 'warn', 3500); return; }
   if (['tick', 'cry_stop', 'woke', 'slept', 'feed', 'diaper', 'hold', 'rock', 'cuddle', 'sing', 'play', 'read', 'burp', 'tummy'].includes(e.type)) return; // quiet routine
@@ -373,7 +375,7 @@ function handlePlaydate(G, m) {
 }
 function spawnGuest(G, snap) {
   removeGuest(G);
-  G.guest = new Baby(G.R.scene, null, { guest: true });
+  G.guest = new Baby(G.R.scene, null, { guest: true, lowSpec: G.R.software });
   G.guestView = { sim: { days: snap.days }, baby: { name: snap.name, sex: snap.sex, appearance: snap.appearance, needs: { health: 90 }, emo: {}, phys: { heightCm: snap.heightCm, tempC: 36.8, jaundice: 0 }, wear: { ...snap.wear, outfit: snap.wear.outfit || 'mint' }, state: { activity: 'awake', location: 'floor', position: snap.days > 200 ? 'sitting' : 'back', held: false, crying: false, cryIntensity: 0, mobile: false, hospitalized: false, pacifier: false, whiteNoise: false }, mood: snap.sick ? 'sick' : 'playing', milestones: { sits: snap.days > 200, walks: snap.days > 400 }, illness: snap.sick ? { severity: 40 } : null } };
   SPOTS.floor_guest = { pos: [0.6, 0.03, -1.4], rot: 0.9, kind: 'floor' };
   G.guestView.baby.state.location = 'floor_guest';

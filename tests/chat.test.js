@@ -244,3 +244,90 @@ test('it is journalled and remembered in the story, permanently', () => {
   const heavy = g.story.memories.find((m) => /hit/i.test(m.text));
   assert.ok(heavy.weight >= 90, 'and it is one of the heaviest memories there is');
 });
+
+// ---- character rigging ---------------------------------------------------------------------
+// Anatomy the eye notices instantly and code notices never, unless it is measured.
+
+test('a standing visitor has their arms down, not over their head', async () => {
+  const THREE = await import('three');
+  const { adultLayout } = await import('../client/src/characters/adult.js');
+  const { makeBones } = await import('../client/src/characters/babyMesh.js');
+  const L = adultLayout({ h: 1.7, build: 0.5, female: true });
+  const { bones, byName } = makeBones(L);
+  const root = new THREE.Group(); root.add(bones[0]);
+  // the same pose the idle applies at rest
+  for (const [s, sx] of [['L', -1], ['R', 1]]) {
+    byName['upperArm' + s].rotation.z = -sx * (Math.PI * 0.46 - 0.05);
+    byName['foreArm' + s].rotation.z = -sx * 0.2;
+  }
+  root.updateMatrixWorld(true);
+  const at = (n) => new THREE.Vector3().setFromMatrixPosition(byName[n].matrixWorld);
+  for (const s of ['L', 'R']) {
+    const shoulder = at('upperArm' + s), wrist = at('hand' + s);
+    assert.ok(wrist.y < shoulder.y - 0.3, `${s} wrist must hang well below the shoulder (${wrist.y.toFixed(2)} vs ${shoulder.y.toFixed(2)})`);
+    assert.ok(Math.abs(wrist.x) < Math.abs(at('shoulder' in L.J ? 'upperArm' + s : 'upperArm' + s).x) + 0.15, 'and stay beside the body');
+    assert.ok(wrist.y > 0.4, 'but not dangle past the knees');
+  }
+});
+
+test('a visitor is exactly as tall as they were designed to be', async () => {
+  const { adultLayout } = await import('../client/src/characters/adult.js');
+  for (const h of [1.52, 1.68, 1.83]) {
+    const L = adultLayout({ h, build: 0.5, female: false });
+    assert.ok(Math.abs(L.totalH - h) < 0.005, `asked for ${h}m, laid out ${L.totalH.toFixed(3)}m`);
+    assert.ok(L.J.hips.y > h * 0.4 && L.J.hips.y < h * 0.56, 'with hips at a human fraction of the height');
+    assert.ok(L.headCenter.y > h * 0.88, 'and the head on top');
+  }
+});
+
+test('every character has exactly the limbs it should — no extras, none missing', async () => {
+  const { adultLayout } = await import('../client/src/characters/adult.js');
+  const { skeletonLayout } = await import('../client/src/characters/babyMesh.js');
+  for (const [what, L] of [['adult', adultLayout({})], ['baby', skeletonLayout(0)], ['child', skeletonLayout(1500)]]) {
+    const names = L.bones.map((b) => b[0]);
+    assert.equal(new Set(names).size, names.length, `${what}: no duplicate bones`);
+    for (const side of ['L', 'R']) for (const part of ['upperArm', 'foreArm', 'hand', 'thigh', 'shin', 'foot']) {
+      assert.equal(names.filter((n) => n === part + side).length, 1, `${what}: exactly one ${part}${side}`);
+    }
+    assert.equal(names.filter((n) => n === 'head').length, 1, `${what}: one head`);
+    assert.equal(names.length, 17, `${what}: 17 bones — one spine chain, two arms, two legs`);
+  }
+});
+
+// ---- the child speaking first ----------------------------------------------------------------
+
+test('the child talks to you unprompted, in an age-appropriate way, without repeating itself', async () => {
+  const { rollSpeech } = await import('../server/sim/speech.js');
+  for (const [days, want] of [[30, /\*/], [250, /"/], [800, /"/], [1500, /"/]]) {
+    const g = child(days, (x) => { x.baby.needs.stimulation = 30; x.baby.needs.affection = 30; });
+    const r = makeRng(days);
+    const said = [];
+    for (let i = 0; i < 4000 && said.length < 12; i++) {
+      g.sim.time += 300;
+      const line = rollSpeech(g, 300 / 3600, r);
+      if (line) said.push(line);
+    }
+    assert.ok(said.length >= 4, `a ${days}-day-old should pipe up sometimes, got ${said.length}`);
+    assert.ok(said.every((l) => want.test(l)), `${days}d lines should be age-appropriate: ${said[0]}`);
+    // No line should follow itself, and the recent window should stop tight loops.
+    for (let i = 1; i < said.length; i++) assert.notEqual(said[i], said[i - 1], 'never twice in a row');
+    assert.ok(new Set(said).size >= Math.min(4, said.length), `and should vary: ${new Set(said).size} distinct of ${said.length}`);
+  }
+});
+
+test('a sleeping or crying child does not chat', async () => {
+  const { rollSpeech } = await import('../server/sim/speech.js');
+  for (const state of [{ activity: 'sleeping' }, { cryingSince: 1 }]) {
+    const g = child(900, (x) => Object.assign(x.baby.state, state));
+    const r = makeRng(5);
+    let said = 0;
+    for (let i = 0; i < 3000; i++) { g.sim.time += 300; if (rollSpeech(g, 300 / 3600, r)) said++; }
+    assert.equal(said, 0, `no chatter while ${JSON.stringify(state)}`);
+  }
+});
+
+test('unprompted speech reaches the journal as its own event type', () => {
+  const g = child(900, (x) => { x.baby.needs.affection = 25; x.baby.needs.stimulation = 25; });
+  for (let i = 0; i < 200 && !g.journal.some((e) => e.type === 'says'); i++) advance(g, 900);
+  assert.ok(g.journal.some((e) => e.type === 'says'), 'the client picks these up by type to put them in the chat thread');
+});

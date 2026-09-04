@@ -27,8 +27,8 @@ function spotFor(activity, babyLocation) {
 }
 
 export class Visitors {
-  constructor(scene, { mobile = false } = {}) {
-    this.scene = scene; this.mobile = mobile;
+  constructor(scene, { mobile = false, lowSpec = false } = {}) {
+    this.scene = scene; this.mobile = mobile; this.lowSpec = lowSpec;
     this.people = new Map();   // contactId -> { npc, spot, arrived }
     this.tmp = new THREE.Vector3();
   }
@@ -51,7 +51,7 @@ export class Visitors {
     for (const [id, info] of here) {
       let rec = this.people.get(id);
       if (!rec) {
-        const npc = new Adult(this.scene, { id, relation: info.relation, name: info.name, mobile: this.mobile });
+        const npc = new Adult(this.scene, { id, relation: info.relation, name: info.name, mobile: this.mobile, lowSpec: this.lowSpec });
         rec = { npc, spot: null, t: 0 };
         this.people.set(id, rec);
       }
