@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { polygonise, skinGeometry, makeBones, HeadSurface, clipGeometry, offsetShell, handBalls, footBalls, above, below, all, any } from './babyMesh.js';
 import { makeSkinMaterial } from './skinMaterial.js';
-import { irisTexture, hairMaterial } from './babyFace.js';
+import { irisTexture, hairMaterial, hairShellGeometry } from './babyFace.js';
 import { fabricTexture, clothMaterial, skinMicroTexture } from '../engine/textures.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -86,16 +86,16 @@ function adultHeadBalls(B, L, grow = 1) {
   ball(V(0, hc.y - P.headR * 0.55, P.headR * 0.16), P.headR * 0.58, 0.75);   // jaw
   ball(V(0, hc.y - P.headR * 0.78, P.headR * 0.3), P.headR * 0.3, 0.5);      // chin
   // brow ridge, a real one: it is what stops a head reading as an egg
-  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.3, hc.y + P.headR * 0.26, P.headR * 0.76), P.headR * 0.16, 0.28);
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.3, hc.y + P.headR * 0.26, P.headR * 0.76), P.headR * 0.15, 0.78);
   // nose: bridge, tip, nostril wings — and carved nostrils and a philtrum below
-  ball(V(0, hc.y + P.headR * 0.22, P.headR * 0.62), P.headR * 0.07, 0.24);
-  ball(V(0, hc.y + P.headR * 0.05, P.headR * 0.72), P.headR * 0.075, 0.3);
-  ball(V(0, hc.y - P.headR * 0.12, P.headR * 0.82), P.headR * 0.105, 0.42);
-  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.095, hc.y - P.headR * 0.17, P.headR * 0.76), P.headR * 0.06, 0.3);
+  ball(V(0, hc.y + P.headR * 0.22, P.headR * 0.62), P.headR * 0.065, 0.82);
+  ball(V(0, hc.y + P.headR * 0.05, P.headR * 0.74), P.headR * 0.072, 0.9);
+  ball(V(0, hc.y - P.headR * 0.12, P.headR * 0.86), P.headR * 0.098, 0.95);
+  for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.1, hc.y - P.headR * 0.17, P.headR * 0.79), P.headR * 0.058, 0.88);
   for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.075, hc.y - P.headR * 0.2, P.headR * 0.79), P.headR * 0.042, -0.5);
   ball(V(0, hc.y - P.headR * 0.32, P.headR * 0.78), P.headR * 0.05, -0.22);   // philtrum
   // mouth: a fuller upper and lower lip mass with the line between them carved
-  ball(V(0, hc.y - P.headR * 0.44, P.headR * 0.74), P.headR * 0.1, 0.2);
+  ball(V(0, hc.y - P.headR * 0.44, P.headR * 0.76), P.headR * 0.095, 0.8);
   ball(V(0, hc.y - P.headR * 0.47, P.headR * 0.76), P.headR * 0.08, -0.3);
   for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.34, hc.y + P.headR * 0.05, P.headR * 0.84), P.headR * 0.15, -0.4);  // eye sockets
   for (const sx of [-1, 1]) ball(V(sx * P.headR * 0.5, hc.y - P.headR * 0.2, P.headR * 0.45), P.headR * 0.3, 0.4); // cheekbones
@@ -291,7 +291,7 @@ export class Adult {
     this.eyes = [];
     for (const sx of [-1, 1]) {
       const socket = new THREE.Group();
-      socket.position.copy(onSurface(V(sx * 0.36, 0.1, 1), -eyeR * 0.95));  // an eyeball sits in a socket, not on a face
+      socket.position.copy(onSurface(V(sx * 0.36, 0.1, 1), -eyeR * 0.6));  // an eyeball sits in a socket, not on a face
       const ball = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 24, 16), sclera); socket.add(ball);
       const ir = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 1.012, 24, 12, 0, Math.PI * 2, 0, 0.58), iris);
       ir.rotation.x = Math.PI / 2; ir.scale.z = 1.12; socket.add(ir);
@@ -363,32 +363,12 @@ export class Adult {
     const L = this.layout, P = L.P, look = this.look;
     // The hair is a volume; the strands are the texture on it.
     //
-    // A hemisphere cap plus a separate falling sheet meant two objects that had to keep agreeing with
-    // each other, and the sheet showed its cut edges as hard black bars beside the face. Instead the
-    // hair is one closed shell whose radius is a function of direction: outside the skin over the
-    // scalp, tucked inside it over the face, and swelling down and back by however long this person
-    // wears their hair. A radius function is star-shaped by construction, so the surface can never
-    // self-intersect or leave an edge — the hairline is simply where the shell crosses the skin.
-    const drop = P.headR * (0.3 + look.hairLength * 2.6);
-    const geo = new THREE.SphereGeometry(1, 56, 40);
-    const p = geo.attributes.position, d = new THREE.Vector3();
-    const seed = hashOf(this.id + ':hairshell');
-    for (let i = 0; i < p.count; i++) {
-      d.fromBufferAttribute(p, i).normalize();
-      // scalp mask: no hair over the face, none below the jaw at the front
-      const bare = clamp01((d.z - 0.18) * 2.6) * clamp01((0.62 - d.y) * 1.7);
-      const scalp = 1 - bare;
-      let r = P.headR * (0.9 + scalp * 0.17);
-      // the fall: a swell behind and below the head, strongest just under ear height
-      const back = clamp01(-d.z * 1.1 + 0.4);
-      const band = Math.exp(-Math.pow((d.y + 0.42) / 0.52, 2));
-      r += drop * back * band * scalp;
-      // a slow wave around the head so it is a head of hair, not a moulding
-      r *= 1 + Math.sin(d.x * 7.5 + seed * 0.01) * 0.022 * scalp + Math.sin(d.y * 9.0 + d.z * 4.0) * 0.016 * scalp;
-      p.setXYZ(i, d.x * r, d.y * r, d.z * r);
-    }
-    p.needsUpdate = true;
-    geo.computeVertexNormals();
+    // The volume is hairShellGeometry, shared with the baby — see babyFace.js for why it is built as
+    // a radius function rather than a cap plus a falling sheet.
+    // `drop` is a radius increase, and the direction it applies to already carries most of the
+    // distance — at the old value long hair ballooned into a cone twice the size of the head.
+    const drop = P.headR * (0.18 + look.hairLength * 0.95);
+    const geo = hairShellGeometry({ R: P.headR, stand: 0.075, drop, seed: hashOf(this.id + ':hairshell') * 0.01, segments: 56, hairline: 0.5 });
     geo.translate(0, L.headCenter.y - L.J.head.y, -P.headR * 0.06);
     const cap = new THREE.Mesh(geo, hairMaterial(look.hairColor, 0.58));
     cap.castShadow = true; cap.receiveShadow = true; cap.frustumCulled = false;
@@ -397,8 +377,8 @@ export class Adult {
 
     // Strands on top of that volume: short, thick and bent, so they break the shell's silhouette and
     // catch light along it. Long straight rods standing off the scalp are a pincushion, not hair.
-    const count = this.lowSpec ? 400 : this.mobile ? 1400 : 3200;
-    const len = P.headR * 0.13;
+    const count = this.lowSpec ? 600 : this.mobile ? 2000 : 5200;
+    const len = P.headR * 0.085;
     const strand = new THREE.CylinderGeometry(P.headR * 0.005, P.headR * 0.019, len, 4, 4, false);
     strand.translate(0, len * 0.5, 0);
     { const sp = strand.attributes.position;
@@ -420,7 +400,7 @@ export class Adult {
       const dir = V(Math.sin(theta) * Math.cos(phi), Math.cos(theta), Math.sin(theta) * Math.sin(phi));
       if (dir.z > 0.3 && dir.y < 0.5) continue;   // the face stays bare
       if (dir.y < -0.55) continue;
-      pt.copy(hairSurf.point(dir, -P.headR * 0.055));
+      pt.copy(hairSurf.point(dir, -P.headR * 0.045));
       const lean = V(dir.x * 0.3, -0.6, -0.6 + dir.z * 0.2).normalize();
       q.setFromUnitVectors(up, dir.clone().multiplyScalar(0.74).add(lean.multiplyScalar(0.4)).normalize());
       q.multiply(roll.setFromAxisAngle(up, rand() * Math.PI * 2));

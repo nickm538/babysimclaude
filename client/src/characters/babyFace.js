@@ -14,6 +14,36 @@ export function hairMaterial(color, roughness = 0.5) {
   });
 }
 
+
+// A head of hair as one closed volume, shared by the baby and the adult visitors.
+//
+// Its radius is a function of direction: outside the skin over the scalp, tucked inside it over the
+// face, and swelling down and back by however long the hair is. A radius function is star-shaped by
+// construction, so the surface can neither self-intersect nor leave a cut edge — the hairline is
+// simply where the shell crosses the skin, so there is nothing to trim and no seam to hide. A cap
+// plus a separate falling sheet, which is what this replaced, meant two objects that had to keep
+// agreeing with each other, and the sheet showed its edges as hard black bars beside the face.
+//
+// `stand` is how far the shell stands off the scalp — negative for a newborn's wisp, which leaves the
+// shell inside the skin and lets the strands alone do the work. `drop` is the fall behind and below.
+export function hairShellGeometry({ R, stand = 0.08, drop = 0, seed = 1, segments = 48, hairline = 0.62 }) {
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const geo = new THREE.SphereGeometry(1, segments, Math.round(segments * 0.72));
+  const p = geo.attributes.position, d = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    d.fromBufferAttribute(p, i).normalize();
+    const scalp = 1 - clamp((d.z - 0.14) * 2.6) * clamp((hairline - d.y) * 1.9);   // bare over the face
+    let r = R * (0.9 + scalp * (0.1 + stand));
+    const back = clamp(-d.z * 1.1 + 0.4), band = Math.exp(-Math.pow((d.y + 0.42) / 0.52, 2));
+    r += drop * back * band * scalp;
+    // a slow wave, so it is a head of hair rather than a moulding
+    r *= 1 + Math.sin(d.x * 7.5 + seed) * 0.022 * scalp + Math.sin(d.y * 9 + d.z * 4) * 0.016 * scalp;
+    p.setXYZ(i, d.x * r, d.y * r, d.z * r);
+  }
+  p.needsUpdate = true; geo.computeVertexNormals();
+  return geo;
+}
+
 export function irisTexture(color) {
   const c = document.createElement('canvas'); c.width = c.height = 256; const ctx = c.getContext('2d');
   const g = ctx.createRadialGradient(128, 128, 20, 128, 128, 128);
@@ -120,13 +150,13 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
   const count = Math.floor(200 + amount * 1500 + Math.min(1, days / 700) * 3600);
   // Short and thick beats long and thin: strands this size merge into a mass of hair, where the same
   // count at twice the length and half the width reads as a pincushion of separate wires.
-  const len = R * (0.07 + amount * 0.06 + Math.min(1, days / 900) * 0.24);
-  const strandGeo = new THREE.CylinderGeometry(R * 0.0025, R * 0.011, len, 5, 4);
+  const len = R * (0.05 + amount * 0.04 + Math.min(1, days / 900) * 0.13);
+  const strandGeo = new THREE.CylinderGeometry(R * 0.003, R * 0.015, len, 5, 4);
   strandGeo.translate(0, len / 2, 0);
   // Curve each strand back and down along the skull, in the strand's own frame. The bend is what
   // makes it hair; a straight tapered rod at any density is a pincushion.
   const sp = strandGeo.attributes.position;
-  for (let i = 0; i < sp.count; i++) { const t = sp.getY(i) / len; sp.setZ(i, sp.getZ(i) - t * t * len * 0.85); sp.setY(i, sp.getY(i) - t * t * len * 0.34); }
+  for (let i = 0; i < sp.count; i++) { const t = sp.getY(i) / len; sp.setZ(i, sp.getZ(i) - t * t * len * 0.95); sp.setY(i, sp.getY(i) - t * t * len * 0.42); }
   sp.needsUpdate = true; strandGeo.computeVertexNormals();
   const hairMat = hairMaterial(appearance.hairColor || '#3b2417', 0.5);
   const hair = new THREE.InstancedMesh(strandGeo, hairMat, count);
@@ -138,7 +168,7 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
     const theta = Math.acos(1 - 2 * u), phi = v * Math.PI * 2; // uniform on sphere
     nrm.set(Math.sin(theta) * Math.cos(phi), Math.cos(theta), Math.sin(theta) * Math.sin(phi));
     // scalp region: above brow line (y > 0.18R relative to center), not on the face (z < 0.55R when low)
-    pos.copy(onSurface(nrm, -R * 0.01));
+    pos.copy(onSurface(nrm, -R * 0.035));  // rooted below the shell, not standing on it
     const rel = pos.clone().sub(hc);
     if (rel.y < R * 0.12) continue;
     if (rel.z > R * 0.45 && rel.y < R * 0.55) continue;
@@ -158,10 +188,25 @@ export function buildFace({ headBone, layout, skinMat, appearance, days, surface
   }
   hair.count = Math.max(1, placed); hair.instanceMatrix.needsUpdate = true; if (hair.instanceColor) hair.instanceColor.needsUpdate = true;
   hair.castShadow = false; face.add(hair); F.hair = hair;
-  if (days > 300) {
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(R * 1.0, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.42), hairMat);
-    const capR = surface.radius(new THREE.Vector3(0, 1, 0)); cap.scale.setScalar(capR / R * 1.02); cap.position.copy(hc).add(new THREE.Vector3(0, R * 0.02, -R * 0.1)); cap.rotation.x = -0.2; face.add(cap); F.cap = cap;
-  }
+  // The volume the strands sit on. A wispy newborn gets a negative stand, which leaves the shell
+  // inside the skin where it cannot be seen and lets the strands alone carry the hair.
+  const capR = surface.radius(new THREE.Vector3(0, 1, 0));
+  // Age gates the volume, not just the amount. A newborn with plenty of hair still has *wispy* hair:
+  // its shell stays inside the skin, where it cannot be seen, and the strands alone carry it. The
+  // shell only emerges as the hair thickens over the first year and a half.
+  const ageK = 0.2 + 0.8 * Math.min(1, days / 600);
+  const capGeo = hairShellGeometry({
+    R: capR,
+    stand: -0.055 + amount * 0.19 * ageK,
+    drop: capR * amount * Math.min(1, days / 900) * 0.55,
+    seed: (Number(days) || 0) * 0.31 + amount * 7,
+    segments: 44,
+    hairline: 0.74,   // a baby's hairline sits high; a fringe on the brows reads as a wig
+  });
+  const cap = new THREE.Mesh(capGeo, hairMat);
+  cap.position.copy(hc).add(new THREE.Vector3(0, R * 0.02, -R * 0.06));
+  cap.castShadow = true; cap.receiveShadow = true;
+  face.add(cap); F.cap = cap;
   F.headCenterLocal = hc;
   return F;
 }
