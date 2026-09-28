@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cradle">
+<meta name="theme-color" content="#0f1216">
+<meta name="description" content="Cradle — a real-time, first-person newborn raising simulation.">
+<title>Cradle — First Days Home</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="stylesheet" href="/src/ui/styles.css">
+<script type="importmap">
+{ "imports": {
+  "three": "/vendor/three/build/three.module.js",
+  "three/addons/": "/vendor/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+  <div id="ui"></div>
+  <div id="overlay"></div>
+</div>
+<div id="boot">
+  <div class="boot-card">
+    <div class="boot-logo">🍼</div>
+    <div class="boot-title">Cradle</div>
+    <div class="boot-sub">First days home</div>
+    <div class="boot-status" id="boot-status">Loading…</div>
+  </div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
